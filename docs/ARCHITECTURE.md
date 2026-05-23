@@ -4,6 +4,8 @@
 >
 > Source of truth: this document describes what the code in `ccg.sh` and `bin/ccg.js` actually does — not what marketing copy claims. Cross-reference function names with `grep -n '^ccg_\|^_ccg_' ccg.sh` if anything looks off.
 
+**English** ｜ [简体中文](ARCHITECTURE.zh-CN.md) ｜ [日本語](ARCHITECTURE.ja.md) ｜ [한국어](ARCHITECTURE.ko.md)
+
 ---
 
 ## 1. The honest one-liner

@@ -1,4 +1,6 @@
-# `/ccg` — Code Divergence Detector
+# ccg — Code Divergence Detector
+
+> Claude Code のスラッシュコマンド。一度インストールして、diff の上で `/ccg` と入力するだけ。
 
 [![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
@@ -6,91 +8,40 @@
 
 [English](README.md) ｜ [简体中文](README.zh-CN.md) ｜ **日本語** ｜ [한국어](README.ko.md)　·　[アーキテクチャ →](docs/ARCHITECTURE.md)
 
-> **「より良いコードレビューツール」ではなく、コード分岐検出ツールです。**
-> 多くの AI レビューツールはコンセンサスを追求します。`/ccg` はその逆です—Codex（OpenAI）と Gemini（Google）に同じ diff を並列で評価させ、Claude が **両者の意見が食い違う箇所** を浮かび上がらせます。これこそ人間が判断すべきポイントです。意見の一致 = 低シグナル、分岐 = ゴールド。
-
 ---
 
-## 主張
+## ccg とは
 
-| 既存の AI レビューツール | `/ccg` |
-|---|---|
-| 単一モデル、単一視点 | 2 つの独立したモデルファミリー（訓練データが異なる） |
-| 出力は長文レビューレポート | 出力は **分岐マップ** |
-| 「問題なさそう」と流し読み | 「Codex が X を指摘、Gemini は同意せず、人の判断が必要」が見える |
-| pre-commit フック型（承認 / ブロック） | トリアージツール（「考えるべきは本当にこの 2 つ」） |
+ccg は **Codex（OpenAI）** と **Gemini（Google）** に同じ diff を並列で評価させ、**Claude** が両者の意見が食い違う箇所を浮かび上がらせます——人間が本当に判断すべきポイントです。
 
-この立ち位置はユニークです。**AI 間の意見の相違を浮かび上がらせること自体を製品目標とする** OSS ツールを、私たちは他に把握していません。
+多くの AI レビューツールはコンセンサスを追求します。ccg はその逆。意見の一致 = 低シグナル、分岐 = ゴールド。
 
----
+## ccg にできること
 
-## 三本の柱
+単一モデルのレビューツールでは得られない 3 つのこと：
 
-### Pillar 1 — 分岐エンジン
-同じプロンプトを Codex と Gemini の両方に投げ、構造化された `[FINDING]` フォーマットを要求します。Claude の合成器が以下の 3 セクションを出力：
+**1. Claude とは違う思考をする「セカンドオピニオン」。**
+Codex と Gemini は訓練データが異なり、検出するものも違います。`auth/login.go` の同じ変更で意見が分かれた時、そここそ立ち止まる場所です。
 
-```
-AGREEMENT (N)    — 両方が指摘 → 低シグナル、各 1 行のみ
-DIVERGENCE (M)   — 判断が異なる → 展開、★ 人の判断が必要
-BLINDSPOT (≤2)  — どちらも見ていないが Claude が疑う → 控えめに
-```
+**2. コストの可視化。**
+Codex / Gemini CLI は支出を教えてくれません。ccg は全ての呼び出しを記録し、リスクに応じて最も安く十分なモデルを自動選択（リスクルーティング）、同一プロンプトは 24 時間キャッシュでゼロコストになります。
 
-AGREEMENT セクションは**意図的に短く**保たれます。プロダクトの立場：両方の AI レビュアーが合意しているなら、あなたの単一ソース Claude も同じことに気付くはず——新しい情報量は低い。DIVERGENCE こそが価値です。
-
-### Pillar 2 — リスク対応自動ルーティング
-`cost` / `balanced` / `quality` を手動で選ぶ必要はありません。`ccg_risk_score` が diff を見て決定論的にスコア付けします（このレイヤーに LLM はなし）：
-
-| シグナル | 重み |
-|---|---|
-| パスが `auth/payment/migration/crypto/security` にマッチ | +25..+40 |
-| 本文に `exec/eval/spawn` または SQL+補間 | +20..+30 |
-| diff > 600 行 | +25 |
-| ファイル > 8 個 | +10 |
-| ドキュメントのみの変更 | **-40** |
-
-スコア < 20 → cost。< 60 → balanced。≥ 60 → quality。手動指定が常に優先。
-
-スコアリングは **透明、ゼロコスト、PR 可能** ——誰でも重みを調整できます。
-
-### Pillar 3 — レビュー台帳
-各レビューが `$XDG_DATA_HOME/ccg/ledger.jsonl`（fallback `~/.local/share/ccg/ledger.jsonl`；古い `~/.ccg/` は自動移行）に JSONL 1 行を追記：
-
-```json
-{"ts":"2026-05-22T18:35:06Z","repo":"/path","branch":"feat-x","sha":"91c16ec",
- "mode":"quality","risk":60,"files":1,"lines":"+5-0","paths":["auth/login.go"],
- "synthesis":"divergence on constant-time compare; NEEDS HUMAN DECISION..."}
-```
-
-使い方：
-
-```bash
-ccg_ledger_query                    # 最新 5 件のレビュー
-ccg_ledger_query "src/auth"         # このパスは何回レビューされたか
-```
-
-最初の 50 件では価値が見えませんが、長期的にステートレスツールには真似できない構造的記憶になります。
-
----
+**3. セッションを跨いで残るレビュー履歴。**
+「2 週間前、モデルは `src/auth.ts` について何と言ったか？」 ——ccg の追記専用台帳がこれに答えます。ステートレスなツールには不可能です。
 
 ## インストール
 
-どちらか選択。どちらも `/ccg` スラッシュコマンドを `~/.claude/commands/` にインストールします。
-
-### Option 1 — npm（推奨）
+どちらかを選択：
 
 ```bash
-npx @mcgrapeng/ccg install        # 一回だけ、グローバル汚染なし
-# または
-npm i -g @mcgrapeng/ccg && ccg install
-```
+# npm (推奨)
+npx @mcgrapeng/ccg install
 
-### Option 2 — curl ワンライナー（Node 不要）
-
-```bash
+# または curl ワンライナー、Node 不要
 curl -fsSL https://raw.githubusercontent.com/mcgrapeng/ccg/main/scripts/curl-install.sh | bash
 ```
 
-### 次に AI CLI をインストール
+次に AI CLI を一度だけインストール：
 
 ```bash
 npm i -g @openai/codex @google/gemini-cli
@@ -100,69 +51,90 @@ echo 'export GEMINI_API_KEY="<your-key>"' >> ~/.zshenv
 確認：
 
 ```bash
-npx @mcgrapeng/ccg doctor         # または：ccg doctor
+npx @mcgrapeng/ccg doctor      # Codex / Gemini / API key をチェック
+npx @mcgrapeng/ccg about       # 7 層の機能と現在の環境状態を表示
 ```
-
-新しい Claude Code セッションを開いて `/ccg` を試してください。
 
 ## 使い方
 
-```bash
-# 自動モード：git diff → リスクスコア → 実行 → 合成 → 台帳記録
+変更のある任意の git リポジトリで Claude Code を開き、入力：
+
+```
 /ccg
-
-# 明示的なタスク（リスクスコアスキップ、CCG_MODE 設定済みなら使用）
-/ccg evaluate the lock-free queue implementation in src/queue.ts
-
-# モードを強制
-CCG_MODE=quality /ccg
-
-# 特定のモデルを強制
-CCG_CODEX_MODEL=o3 /ccg
-
-# 履歴クエリ
-source ~/.claude/commands/ccg.sh
-ccg_usage --this-month
-ccg_ledger_query "src/payment"
 ```
 
-## 設定
+ccg は自動で：
+
+1. アクティブな diff をキャプチャ（worktree → staged → upstream → origin-head の 4 段階フォールバック）
+2. リスクを採点し `cost` / `balanced` / `quality` モデルを自動選択
+3. Codex + Gemini に同じプロンプトを並列で実行
+4. 3 セクションに合成：
+
+```
+═══ AGREEMENT (N)  ═══   両方とも指摘 — 低シグナル、各 1 行のみ
+═══ DIVERGENCE (M) ═══   ★ ccg の核心価値
+                          - Codex: X と言った
+                          - Gemini: Y と言った
+                          - Claude の判定: ___ もしくは NEEDS HUMAN DECISION
+═══ BLINDSPOT (≤2) ═══  どちらも見ていないが Claude が疑う — 控えめに
+═══ VERDICT ═══         merge / fix-required / discuss
+```
+
+その後 `ccg_ledger_record` が JSONL 1 行を追記。`ccg_cleanup` が作業ディレクトリを削除します。
+
+## 設定（デフォルトで通常は十分）
+
+モードとモデルの選択は自動です。必要なときだけ上書き：
+
+```bash
+CCG_MODE=quality /ccg          # 任意の diff で quality モデルを強制
+CCG_CODEX_MODEL=o3 /ccg        # 1 つのモデルだけ上書き
+CCG_NO_CACHE=1 /ccg            # この呼び出しのみ 24h キャッシュをスキップ
+```
+
+全ての設定は [アーキテクチャ §5 拡張ポイント](docs/ARCHITECTURE.md#5-extension-points) にあります。よく使うもの：
 
 | 変数 | デフォルト | 用途 |
 |---|---|---|
-| `CCG_MODE` | `auto` | `auto` / `cost` / `balanced` / `quality`。`auto` はリスクスコア |
-| `CCG_CODEX_MODEL` | （モードデフォルト） | codex モデルを上書き |
-| `CCG_GEMINI_MODEL` | （モードデフォルト） | gemini モデルを上書き |
-| `CCG_CODEX_TIMEOUT` | `240` | Codex ハードタイムアウト（秒） |
-| `CCG_GEMINI_TIMEOUT` | `120` | Gemini ハードタイムアウト（秒） |
-| `CCG_NO_CACHE` | `0` | `1` = プロンプトキャッシュをバイパス |
+| `CCG_MODE` | `auto` | `auto` / `cost` / `balanced` / `quality` |
 | `CCG_CACHE_TTL_HOURS` | `24` | キャッシュ TTL |
-| `CCG_CACHE_DIR` | `$XDG_CACHE_HOME/ccg/cache` | キャッシュディレクトリ |
-| `CCG_MAX_PROMPT_KB` | `100` | プロンプトサイズハードリミット |
-| `CCG_USAGE_LOG` | `$XDG_DATA_HOME/ccg/usage.log` | 使用量ログパス |
-| `CCG_LEDGER_LOG` | `$XDG_DATA_HOME/ccg/ledger.jsonl` | 台帳パス |
-| `CCG_KEEP_ARTIFACTS` | `0` | `1` = デバッグ用に作業ディレクトリ保持 |
+| `CCG_MAX_PROMPT_KB` | `100` | 1 回あたりのプロンプトサイズ上限 |
 
-## `/ccg` が輝くとき
+コスト目安（USD / 呼び出し、キャッシュヒット後）：
 
-- **リスクの高い変更**：auth / 支払い / マイグレーション / 暗号——まさに「もう一つのモデルは私が見逃したものを見つけたか？」を知りたい場面
-- **マージ前の PR レビュー**：ブランチが上流より進んでいるとき、`/ccg` は自動でブランチ差分をレビュー
-- **個人開発者の安全網**：人間レビュアーがいない？`/ccg` は「もう一対の目」に最も近い存在
+| モード | Codex | Gemini | 標準コスト |
+|---|---|---|---|
+| `cost`     | gpt-5-nano  | gemini-2.5-flash-lite | ~$0.0007 |
+| `balanced` | gpt-5-mini  | gemini-2.5-flash      | ~$0.0046 |
+| `quality`  | gpt-5       | gemini-2.5-pro        | ~$0.0440 |
 
-## `/ccg` が過剰なとき
+累計支出はいつでも確認可能：
 
-- 変数のリネーム
-- 1 行の typo 修正
-- README の編集
-- 強力なテストカバレッジでの日常的なリファクタ
+```bash
+source ~/.claude/commands/ccg.sh
+ccg_usage --this-month
+```
 
-リスクルーターはこれらを自動的に `cost` モード（~$0.0007）に下げますが、正直なところ：そのまま commit して進めましょう。`/ccg` が真価を発揮するのは、本当に重要な 5–10% の変更です。
+## 適さない用途
 
-## ライセンス
+- Claude Code 以外の IDE（[zen-mcp-server](https://github.com/BeehiveInnovations/zen-mcp-server) を試してください）
+- 静的解析の置き換え（Semgrep / CodeQL と併用してください）
+- 全 PR で自動実行（ccg はトリアージツール、ボットではありません）
+- ストリーミング出力やマルチターン会話
 
-MIT — [LICENSE](LICENSE) を参照。
+## アーキテクチャとコントリビュート
 
-## 謝辞
+ccg は **7 層** で構成されており、「分岐検出」は最上位 1 層にすぎません。下の 6 層（キャッシュ、台帳、使用量、リスクルーティング、スマート diff、安全な CLI スケジューリング）はそれぞれ独立して実問題を解決します。`ccg.sh` を変更する前に [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を読んでください。
 
-- [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) の元々の `/ccg` コンセプト
-- Anthropic Claude Code、OpenAI Codex CLI、Google Gemini CLI
+テスト：
+
+```bash
+bash tests/test_ccg.sh                # 99 個の回帰テスト、~31s
+REAL_CLI=1 bash tests/test_ccg.sh     # +2 個のライブ API テスト（課金あり）
+```
+
+## ライセンスと謝辞
+
+MIT —— [LICENSE](LICENSE) を参照。
+
+[oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) の元々の `/ccg` コンセプト · Claude Code · OpenAI Codex CLI · Google Gemini CLI を基に構築。

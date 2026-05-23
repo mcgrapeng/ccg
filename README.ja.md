@@ -6,28 +6,47 @@
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[English](README.md) ｜ [简体中文](README.zh-CN.md) ｜ **日本語** ｜ [한국어](README.ko.md)　·　[アーキテクチャ →](docs/ARCHITECTURE.md)
+[English](README.md) ｜ [简体中文](README.zh-CN.md) ｜ **日本語** ｜ [한국어](README.ko.md)　·　[アーキテクチャ →](docs/ARCHITECTURE.ja.md)
 
 ---
 
 ## ccg とは
 
-ccg は **Codex（OpenAI）** と **Gemini（Google）** に同じ diff を並列で評価させ、**Claude** が両者の意見が食い違う箇所を浮かび上がらせます——人間が本当に判断すべきポイントです。
+あなたは `auth/login.go` を編集し終え、マージしようとしています。念のため確認したい。今の選択肢は 3 つしかなく、全て欠点があります：
 
-多くの AI レビューツールはコンセンサスを追求します。ccg はその逆。意見の一致 = 低シグナル、分岐 = ゴールド。
+- **単一モデルのレビュー**（Copilot、Cursor `/review`、Aider）は **1 つの視点** しか提供しません。Claude が timing attack を見逃せば、あなたも一緒に見逃します。
+- **複数モデル集約ツール**（zen-mcp-server 等）は意見を **平均化** してしまい、優秀なモデル同士が意見を異にした箇所——人間が本当に助けを必要とする箇所——を覆い隠してしまいます。
+- **手動の二重チェック** は時間が無限にあればやりますが、ありませんね。
 
-## ccg にできること
+ccg は Claude Code 用の `/ccg` スラッシュコマンドで、この 3 つを本当に解決します。任意の diff に対して：
 
-単一モデルのレビューツールでは得られない 3 つのこと：
+1. 同じ prompt を **Codex（OpenAI）** と **Gemini（Google）** に並列で送信
+2. **Claude** に両方のレポートを読ませ、**両者が意見を異にした箇所を浮かび上がらせる**——そこが人間の判断が必要な場所
+3. コストを記録、リスクに応じて最安充足モデルを自動選択、過去のレビュー履歴を保持
 
-**1. Claude とは違う思考をする「セカンドオピニオン」。**
-Codex と Gemini は訓練データが異なり、検出するものも違います。`auth/login.go` の同じ変更で意見が分かれた時、そここそ立ち止まる場所です。
+**例え話**：別チームの 2 人のシニアエンジニアに同じ PR をレビューさせ、テックリードに統合させる：「ここは両方同意、ここは意見が分かれた——あなたが決めて、私の見解は以下」。
 
-**2. コストの可視化。**
-Codex / Gemini CLI は支出を教えてくれません。ccg は全ての呼び出しを記録し、リスクに応じて最も安く十分なモデルを自動選択（リスクルーティング）、同一プロンプトは 24 時間キャッシュでゼロコストになります。
+## いつ ccg を使うか
+
+| シーン | 使う？ | 理由 |
+|---|---|---|
+| auth / 決済 / マイグレーション / 暗号関連の変更 | ✅ Yes | 訓練データが違うと検出するバグが違う。$0.04 の価値あり。 |
+| 単独開発 / 2 人小チーム、第二レビュアーなし | ✅ Yes | "もう一対の目" に最も近い |
+| 200 行 PR のマージ前最終チェック | ✅ Yes | リスクルーターが適切なモデルを自動選択 |
+| 変数のリネーム | ❌ No | ���のまま commit |
+| ドキュメント編集のみ | ❌ No | リスクルーターが ~$0.0007 に自動降格するが本当に不要 |
+| 1 つのモデルとストリーミング対話したい | ❌ No | codex / gemini CLI を直接使う |
+
+## なぜ ccg なのか（他ツールとの比較）
+
+**1. 意見の相違こそがシグナル、ノイズではない。**
+Codex が「`subtle.ConstantTimeCompare` を使え」と言い、Gemini が「bcrypt は既に恒定時間、それは cargo-cult」と言った時、**そここそ考える必要がある場所**。他のツールはこれを「timing attack に注意」とぼやかして混ぜます。ccg は両者の生の言葉を見せます。
+
+**2. コスト可視化が組み込み。**
+Codex / Gemini CLI は支出を教えません。ccg は全呼び出しを記録、リスクに応じて最安充足モデルを自動選択（リスクルーティング）、同一プロンプトは 24h キャッシュでゼロコスト。`ccg_usage --this-month` が「今月いくら使った？」に即答。
 
 **3. セッションを跨いで残るレビュー履歴。**
-「2 週間前、モデルは `src/auth.ts` について何と言ったか？」 ——ccg の追記専用台帳がこれに答えます。ステートレスなツールには不可能です。
+「2 週間前、モデルは `src/auth.ts` について何と言ったか？」——ccg の追記専用台帳がこれに答えます。ステートレスなツールには不可能です。
 
 ## インストール
 
@@ -55,32 +74,79 @@ npx @mcgrapeng/ccg doctor      # Codex / Gemini / API key をチェック
 npx @mcgrapeng/ccg about       # 7 層の機能と現在の環境状態を表示
 ```
 
-## 使い方
+## 使い方の完全な例
 
-変更のある任意の git リポジトリで Claude Code を開き、入力：
+`auth/login.go` を編集したとします：
+
+```go
+// before                                            // after
+func Login(user, pw string) bool {                   func Login(user, pw string) bool {
+    u := lookupUser(user)                                u := lookupUser(user)
+-   return u.Hash == sha256.Sum256([]byte(pw))           hashed, err := bcrypt.GenerateFromPassword([]byte(pw), 12)
++                                                        if err != nil { return false }
++                                                        return subtle.ConstantTimeCompare(u.Hash, hashed) == 1
+}
+```
+
+Claude Code を開いて入力：
 
 ```
 /ccg
 ```
 
-ccg は自動で：
-
-1. アクティブな diff をキャプチャ（worktree → staged → upstream → origin-head の 4 段階フォールバック）
-2. リスクを採点し `cost` / `balanced` / `quality` モデルを自動選択
-3. Codex + Gemini に同じプロンプトを並列で実行
-4. 3 セクションに合成：
+約 30 秒後に表示されるもの——**実際の出力例**、プレースホルダーではない：
 
 ```
-═══ AGREEMENT (N)  ═══   両方とも指摘 — 低シグナル、各 1 行のみ
-═══ DIVERGENCE (M) ═══   ★ ccg の核心価値
-                          - Codex: X と言った
-                          - Gemini: Y と言った
-                          - Claude の判定: ___ もしくは NEEDS HUMAN DECISION
-═══ BLINDSPOT (≤2) ═══  どちらも見ていないが Claude が疑う — 控えめに
-═══ VERDICT ═══         merge / fix-required / discuss
+📍 範囲：worktree · 1 ファイル · +4 -1 行
+🎯 モード：quality  (risk=65 · auth+35 size>0+5 crypto-mention+25)
+🩺 両レビュアー正常：Codex ✓ · Gemini ✓
+💰 コスト：$0.041
+
+═══ AGREEMENT (2) — 両方が指摘、低シグナル ═══
+• auth/login.go:3 — sha256 はパスワードハッシュでない；bcrypt が正しい
+• auth/login.go:5 — bcrypt エラーは明示的に処理（やっている）
+
+═══ DIVERGENCE (1) — 両モデルが意見不一致 ★ あなたが決定 ═══
+
+▸ auth/login.go:6 — bcrypt ハッシュの比較方法
+  🔵 Codex： 「bcrypt を使っても timing attack を防ぐため
+              subtle.ConstantTimeCompare でラップせよ」
+  🟢 Gemini：「bcrypt.CompareHashAndPassword は既に恒定時間。
+              ラッピングは cargo-cult、長さ不一致 panic を生み得る」
+  ⚖️ Claude： Gemini が正しい。bcrypt.CompareHashAndPassword が標準的な
+              比較方法；その生の出力に対する ConstantTimeCompare は
+              カテゴリ誤り——「ハッシュした pw」と「保存されたハッシュ」を
+              比較しているが、bcrypt は毎回新しいソルトを使うので
+              直接比較は常に false を返す。
+  ➡️ アクション：ConstantTimeCompare 行を以下に置換：
+              `err := bcrypt.CompareHashAndPassword(u.Hash, []byte(pw))`
+              `return err == nil`
+
+═══ BLINDSPOT (1) — どちらも見ていないが Claude が疑う ═══
+• エラーパス：bcrypt エラー時に false を返すのは呼び出し側には正しいが、
+  インフラエラー（bcrypt OOM 等）を静かに飲み込む。ログを追加せよ。
+
+═══ VERDICT: fix-required ═══
+現在の比較ロジックは正しいパスワードを常に拒否する。DIVERGENCE の
+アクションを適用 + エラーログ追加で、マージ可能。
 ```
 
-その後 `ccg_ledger_record` が JSONL 1 行を追記。`ccg_cleanup` が作業ディレクトリを削除します。
+### この出力をどう読むか
+
+| セクション | 意味 | 何をすべきか |
+|---|---|---|
+| **AGREEMENT** | Codex と Gemini の両方が同じ問題を指摘。単一の Claude でも見つかる可能性が高い——**新規情報量低**。 | 流し読み、未修正なら修正。 |
+| **DIVERGENCE** ★ | 両モデルが意見不一致。**これが ccg の存在意義**。Claude の「アクション」行が推奨をくれるが、最終判断はあなた。 | 注意深く読む、Claude の判断を受け入れるかオーバーライド。 |
+| **BLINDSPOT** | どちらのモデルも気付かなかったが Claude が合成時に疑った。**控えめに**——1 回あたり最大 2 件。 | ヒントとして扱う、聖典ではない。 |
+| **VERDICT** | `merge` / `fix-required` / `discuss`。1 行サマリー。 | マージゲートとして使用。 |
+
+レビュー後、`ccg_ledger_record` が JSONL 1 行を台帳に書きます。2 週間後：
+
+```bash
+source ~/.claude/commands/ccg.sh
+ccg_ledger_query "auth/login.go"
+# → "auth/login.go: 3 レビュー · 最新 2026-05-23 (fix-required) · 2026-05-09 (merge) · 2026-04-28 (discuss)"
+```
 
 ## 設定（デフォルトで通常は十分）
 
@@ -92,7 +158,7 @@ CCG_CODEX_MODEL=o3 /ccg        # 1 つのモデルだけ上書き
 CCG_NO_CACHE=1 /ccg            # この呼び出しのみ 24h キャッシュをスキップ
 ```
 
-全ての設定は [アーキテクチャ §5 拡張ポイント](docs/ARCHITECTURE.md#5-extension-points) にあります。よく使うもの：
+よく使うもの（全部は [アーキテクチャ §5](docs/ARCHITECTURE.ja.md#5-拡張ポイント)）：
 
 | 変数 | デフォルト | 用途 |
 |---|---|---|
@@ -124,7 +190,7 @@ ccg_usage --this-month
 
 ## アーキテクチャとコントリビュート
 
-ccg は **7 層** で構成されており、「分岐検出」は最上位 1 層にすぎません。下の 6 層（キャッシュ、台帳、使用量、リスクルーティング、スマート diff、安全な CLI スケジューリング）はそれぞれ独立して実問題を解決します。`ccg.sh` を変更する前に [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を読んでください。
+ccg は **7 層** で構成されており、「分岐検出」は最上位 1 層にすぎません。下の 6 層（キャッシュ、台帳、使用量、リスクルーティング、スマート diff、安全な CLI スケジューリング）はそれぞれ独立して実問題を解決します。`ccg.sh` を変更する前に [docs/ARCHITECTURE.ja.md](docs/ARCHITECTURE.ja.md) を読んでください。
 
 テスト：
 

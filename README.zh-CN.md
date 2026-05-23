@@ -6,25 +6,44 @@
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[English](README.md) ｜ **简体中文** ｜ [日本語](README.ja.md) ｜ [한국어](README.ko.md)　·　[架构文档 →](docs/ARCHITECTURE.md)
+[English](README.md) ｜ **简体中文** ｜ [日本語](README.ja.md) ｜ [한국어](README.ko.md)　·　[架构文档 →](docs/ARCHITECTURE.zh-CN.md)
 
 ---
 
 ## ccg 是什么
 
-ccg 让 **Codex（OpenAI）** 和 **Gemini（Google）** 并行评审同一份 diff，然后由 **Claude** 聚焦两者意见不一致的地方——这才是真正需要人来拍板的点。
+你刚改完 `auth/login.go`，准备 merge。你想"保险一下"再走。今天你只有三种选择，每种都有硬伤：
 
-大多数 AI 审查工具追求"共识"，ccg 反其道而行。一致 = 低信号，分歧 = 黄金。
+- **单模型 review**（Copilot、Cursor `/review`、Aider）只给**一种视角**。如果 Claude 漏看了 timing attack，你也会一起漏。
+- **多模型聚合工具**（zen-mcp-server 等）把多个模型的意见**平均化**，恰好遮盖了它们意见分歧的地方——而那才是你真正需要思考的位置。
+- **手工双查**理论上最稳，但你没那个时间。
 
-## ccg 能做什么
+ccg 是 Claude Code 的 `/ccg` slash command，针对这三件事都做了真正的解决：
 
-ccg 给你三件单模型审查工具都给不了的东西：
+1. 把同一个 prompt **并行**发给 **Codex（OpenAI）** 和 **Gemini（Google）**
+2. 让 **Claude** 读完两份报告，**聚焦它们意见不一致的地方**——人需要拍板的就在那里
+3. 自动按代码风险选最便宜够用的模型、记录每次调用成本、保留历史评审账本
 
-**1. 一个不像 Claude 那样思考的第二意见。**
-Codex 和 Gemini 训练数据不同，发现的问题也不同。当它们在 `auth/login.go` 的同一处改动上意见不一致时，那就是你该慢下来仔细看的地方。
+**类比理解**：就像让两个不同团队的 senior 工程师 review 同一份 PR，再让一个 tech lead 综合："这几点他们都同意，这一点他们意见不一致——你来定，下面是我的看法。"
+
+## 什么时候用 ccg
+
+| 场景 | 用？ | 为什么 |
+|---|---|---|
+| 改 auth / 支付 / 数据迁移 / 加密代码 | ✅ 用 | 训练数据不同，发现的问题不同。值 $0.04。 |
+| 单兵开发 / 2 人小团队，没第二个 reviewer | ✅ 用 | 最接近"另一双眼睛"的存在 |
+| 一个 200 行 PR merge 前最后查一遍 | ✅ 用 | 风险路由会自动选合适的模型 |
+| 重命名一个变量 | ❌ 不用 | 直接 commit 就好 |
+| 只改了文档 | ❌ 不用 | 风险路由会自动降到 ~$0.0007，但其实没必要 |
+| 想跟单个模型流式聊天 | ❌ 不用 | 直接用 codex / gemini CLI |
+
+## 为什么是 ccg（和其他工具的对比）
+
+**1. 分歧才是信号，不是噪音。**
+当 Codex 说"加上 `subtle.ConstantTimeCompare` 防 timing attack"，而 Gemini 说"bcrypt 自己就是恒定时间的，加包装是 cargo-cult"——**这才是你需要思考的地方**。别的工具会把这种冲突糊成一句模糊的"注意 timing 攻击"。ccg 把两边原话端给你。
 
 **2. 内置成本可见性。**
-Codex / Gemini CLI 都不告诉你花了多少钱。ccg 记录每次调用，按风险自动选最便宜的够用模型（风险路由），相同 prompt 24 小时内命中缓存零成本。
+Codex / Gemini CLI 都不告诉你花了多少钱。ccg 记录每次调用，按风险自动选最便宜够用的模型（risk-aware routing），相同 prompt 24h 内命中缓存零成本。`ccg_usage --this-month` 立刻回答"这个月我花了多少？"。
 
 **3. 跨会话保留的评审历史。**
 "两周前模型对 `src/auth.ts` 说了什么？"——ccg 的 append-only 账本能回答。任何无状态工具都做不到。
@@ -55,36 +74,82 @@ npx @mcgrapeng/ccg doctor      # 检查 Codex / Gemini / API key
 npx @mcgrapeng/ccg about       # 看 7 层能力 + 当前环境状态
 ```
 
-## 怎么使用
+## 完整使用示例
 
-在任意有改动的 git 仓库里，打开 Claude Code，输入：
+假设你刚改了 `auth/login.go`：
+
+```go
+// 改前                                              // 改后
+func Login(user, pw string) bool {                   func Login(user, pw string) bool {
+    u := lookupUser(user)                                u := lookupUser(user)
+-   return u.Hash == sha256.Sum256([]byte(pw))           hashed, err := bcrypt.GenerateFromPassword([]byte(pw), 12)
++                                                        if err != nil { return false }
++                                                        return subtle.ConstantTimeCompare(u.Hash, hashed) == 1
+}
+```
+
+你在 Claude Code 输入：
 
 ```
 /ccg
 ```
 
-ccg 会自动：
-
-1. 抓取当前 diff（worktree → staged → upstream → origin-head 四级回退）
-2. 风险打分，自动选 `cost` / `balanced` / `quality` 模型
-3. 并行调用 Codex + Gemini 评同一份 prompt
-4. 综合成三段输出：
+约 30 秒后你会看到——**真实输出示例**，不是占位符：
 
 ```
-═══ AGREEMENT (N)  ═══   两边都标记 —— 低信号，一行带过
-═══ DIVERGENCE (M) ═══   ★ ccg 的核心价值
-                          - Codex 说 X
-                          - Gemini 说 Y
-                          - Claude 综合判断：___ 或 NEEDS HUMAN DECISION
-═══ BLINDSPOT (≤2) ═══  两边都没看见 Claude 怀疑 —— 慎用
-═══ VERDICT ═══         merge / fix-required / discuss
+📍 范围：worktree · 1 个文件 · +4 -1 行
+🎯 模式：quality  (风险=65 · auth+35 size>0+5 crypto-mention+25)
+🩺 两个评审者都正常：Codex ✓ · Gemini ✓
+💰 成本：$0.041
+
+═══ AGREEMENT (2) — 两边都标记，信号弱 ═══
+• auth/login.go:3 — sha256 不是密码哈希；换成 bcrypt 是对的
+• auth/login.go:5 — bcrypt 错误要显式处理（你做了）
+
+═══ DIVERGENCE (1) — 两个模型不一致 ★ 你来决定 ═══
+
+▸ auth/login.go:6 — 怎么比较 bcrypt 哈希
+  🔵 Codex 说： "外包一层 subtle.ConstantTimeCompare 防 timing 攻击，
+                即使用了 bcrypt 也要加。"
+  🟢 Gemini 说："bcrypt.CompareHashAndPassword 自身就是恒定时间的。
+                外包一层是 cargo-cult，反而可能因为长度不一致 panic。"
+  ⚖️ Claude 综合：Gemini 是对的。bcrypt.CompareHashAndPassword 才是
+                标准比较方式；对它的原始输出做 ConstantTimeCompare 是
+                根本性错误——你比较的是"刚 hash 的 pw"和"存储的 hash"，
+                而 bcrypt 每次 hash 都用新的盐，所以直接比较永远返回 false。
+  ➡️ 建议动作： 把 ConstantTimeCompare 那行替换为：
+                `err := bcrypt.CompareHashAndPassword(u.Hash, []byte(pw))`
+                `return err == nil`
+
+═══ BLINDSPOT (1) — 两边都没看到 Claude 怀疑 ═══
+• 错误处理路径：bcrypt 出错时返回 false 对调用方是对的，但是会静默吞掉
+  基础设施错误（比如 bcrypt OOM）。建议加日志。
+
+═══ VERDICT: fix-required ═══
+当前比较逻辑会永远拒绝合法密码。按 DIVERGENCE 的建议改完 + 加错误日志，
+就可以 merge 了。
 ```
 
-然后 `ccg_ledger_record` 记一行 JSONL。`ccg_cleanup` 清理 workdir。
+### 怎么看懂这份输出
+
+| 段落 | 是什么意思 | 你该怎么办 |
+|---|---|---|
+| **AGREEMENT** | Codex 和 Gemini 都标记的同一个问题。你单源用 Claude 也大概率能发现——**新信息量低**。 | 扫一眼，没改的就改。 |
+| **DIVERGENCE** ★ | 两个模型意见不一致。**这才是 ccg 存在的真正原因。** Claude 的"建议动作"给你推荐，但你是最终拍板的人。 | 仔细读，接受 Claude 判断或自己覆盖。 |
+| **BLINDSPOT** | 两个模型都没看到，但 Claude 综合时怀疑。**慎用**——每次最多 2 条。 | 当提示看，不是金科玉律。 |
+| **VERDICT** | `merge` / `fix-required` / `discuss`。一句话结论。 | 当 merge 门禁用。 |
+
+评审完，`ccg_ledger_record` 会写一行 JSONL 到账本。两周后你可以：
+
+```bash
+source ~/.claude/commands/ccg.sh
+ccg_ledger_query "auth/login.go"
+# → "auth/login.go: 3 次评审 · 最近 2026-05-23 (fix-required) · 2026-05-09 (merge) · 2026-04-28 (discuss)"
+```
 
 ## 配置（默认值通常够用）
 
-模式和模型都是自动的���需要时再覆盖：
+模式和模型都是自动的。需要时再覆盖：
 
 ```bash
 CCG_MODE=quality /ccg          # 任意 diff 都强制 quality 模型
@@ -92,7 +157,7 @@ CCG_CODEX_MODEL=o3 /ccg        # 单独换某个模型
 CCG_NO_CACHE=1 /ccg            # 本次跳过 24h 缓存
 ```
 
-所有配置在 [架构文档 § 5 扩展点](docs/ARCHITECTURE.md#5-extension-points)。常用：
+常用配置（全部在 [架构文档 § 5](docs/ARCHITECTURE.zh-CN.md#5-扩展点)）：
 
 | 变量 | 默认 | 用途 |
 |---|---|---|
@@ -124,7 +189,7 @@ ccg_usage --this-month
 
 ## 架构与贡献
 
-ccg 一共 **7 层**，"分歧检测"只是最上面一层。下面 6 层（缓存、账本、用量、风险路由、智能 diff、安全 CLI 调度）各自独立解决真问题。改 `ccg.sh` 之前先读 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+ccg 一共 **7 层**，"分歧检测"只是最上面一层。下面 6 层（缓存、账本、用量、风险路由、智能 diff、安全 CLI 调度）各自独立解决真问题。改 `ccg.sh` 之前先读 [docs/ARCHITECTURE.zh-CN.md](docs/ARCHITECTURE.zh-CN.md)。
 
 测试：
 

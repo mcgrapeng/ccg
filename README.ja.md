@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[English](README.md) ｜ [简体中文](README.zh-CN.md) ｜ **日本語** ｜ [한국어](README.ko.md)
+[English](README.md) ｜ [简体中文](README.zh-CN.md) ｜ **日本語** ｜ [한국어](README.ko.md)　·　[アーキテクチャ →](docs/ARCHITECTURE.md)
 
 > **「より良いコードレビューツール」ではなく、コード分岐検出ツールです。**
 > 多くの AI レビューツールはコンセンサスを追求します。`/ccg` はその逆です—Codex（OpenAI）と Gemini（Google）に同じ diff を並列で評価させ、Claude が **両者の意見が食い違う箇所** を浮かび上がらせます。これこそ人間が判断すべきポイントです。意見の一致 = 低シグナル、分岐 = ゴールド。

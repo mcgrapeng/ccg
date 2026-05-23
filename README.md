@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**English** ｜ [简体中文](README.zh-CN.md) ｜ [日本語](README.ja.md) ｜ [한국어](README.ko.md)
+**English** ｜ [简体中文](README.zh-CN.md) ｜ [日本語](README.ja.md) ｜ [한국어](README.ko.md)　·　[Architecture →](docs/ARCHITECTURE.md)
 
 > **Not a "better code review tool." A code divergence detector.**
 > Most AI review tools chase consensus. `/ccg` does the opposite: it runs Codex (OpenAI) and Gemini (Google) in parallel on the same diff, then has Claude **surface where they disagree** — because that's where you, the human, actually need to make a call. Agreement is low-signal; divergence is the gold.

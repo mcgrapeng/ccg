@@ -2,6 +2,26 @@
 
 All notable changes to /ccg.
 
+## [3.1.0] — 2026-05-23
+
+Documentation and discoverability release. No core behavior changes; safe drop-in upgrade from 3.0.0.
+
+### Added
+- **`ccg about` subcommand** — 7-layer capability probe. Shows what ccg can do in *this* environment (not what the README claims), with green/yellow/red status per layer, environment readiness checks (Codex CLI / Gemini CLI / GEMINI_API_KEY / git / slash command installation), XDG storage state (ledger entries, usage entries, cache size), and a quick-reference command palette.
+  - Aliases: `ccg capabilities`, `ccg caps`
+  - Use case: "I'm a new user / contributor — what is ccg actually doing on my machine right now?"
+- **`docs/ARCHITECTURE.md`** — 387-line engineering reference for contributors and integrators. Documents the 7-layer architecture (L1 Safe CLI scheduling → L7 Divergence synthesis), each layer's purpose / problem / solution / "what breaks if you remove it", end-to-end data flow, extension points (signed contract for new risk rules / new LLM providers / new storage paths / pricing customization), invariants enforced by the test suite, and load-bearing design decisions that look weird at first glance.
+- **4-language ARCHITECTURE translations**: `docs/ARCHITECTURE.zh-CN.md`, `docs/ARCHITECTURE.ja.md`, `docs/ARCHITECTURE.ko.md`. Cross-linked from each language's README.
+
+### Changed
+- **README fully rewritten** with a concrete bcrypt walkthrough — actual output (not placeholder mockups) showing how AGREEMENT / DIVERGENCE / BLINDSPOT sections render in practice. The example shows two real-world disagreement: should `bcrypt` be wrapped with `subtle.ConstantTimeCompare`? Claude synthesizes that Codex's recommendation would break the comparison entirely because bcrypt uses a fresh salt every call.
+- **"When to use ccg" rewritten** — replaced the security-only framing (auth / payments / migrations / crypto) with judgment-difficulty framing. New trigger: *feeling*, not *domain*. Added cross-domain examples across social platforms, data/AI infra, frontend, API design, distributed systems, database, and security — emphasizing that divergence detection earns its cost on *any* change where two reasonable engineers might disagree.
+- **README structure** restructured into three-part flow: What / Why-vs-alternatives / Install / Walkthrough — designed to answer "what does it do" and "what does the output mean" before diving into config.
+- README v-prefix removed from H1 headings (no more "v3" branding in titles; version lives in CHANGELOG + npm).
+
+### Internal
+- `PROMO.md` added to `.gitignore` (marketing copy file, not part of npm package).
+
 ## [3.0.0] — 2026-05-23
 
 Repositioning: from "multi-model review tool" to **"code divergence detector"**. Three structural pillars added; product opinion sharpened. 99-test regression (stable across 3 consecutive runs).

@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[English](README.md) ｜ [简体中文](README.zh-CN.md) ｜ [日本語](README.ja.md) ｜ **한국어**
+[English](README.md) ｜ [简体中文](README.zh-CN.md) ｜ [日本語](README.ja.md) ｜ **한국어**　·　[아키텍처 →](docs/ARCHITECTURE.md)
 
 > **"더 나은 코드 리뷰 도구"가 아닙니다. 코드 분기 검출기입니다.**
 > 대부분의 AI 리뷰 도구는 합의를 추구합니다. `/ccg`는 그 반대입니다—Codex(OpenAI)와 Gemini(Google)에 같은 diff를 병렬로 실행시키고, Claude가 **둘의 의견이 갈리는 지점** 을 부각시킵니다—여기가 바로 사람이 판단해야 할 곳입니다. 합의 = 낮은 신호, 분기 = 황금.

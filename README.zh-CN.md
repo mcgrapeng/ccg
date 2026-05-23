@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[English](README.md) ｜ **简体中文** ｜ [日本語](README.ja.md) ｜ [한국어](README.ko.md)
+[English](README.md) ｜ **简体中文** ｜ [日本語](README.ja.md) ｜ [한국어](README.ko.md)　·　[架构文档 →](docs/ARCHITECTURE.md)
 
 > **不是"更好的代码审查工具"，而是代码分歧检测器。**
 > 大多数 AI 审查工具追求共识。`/ccg` 反其道而行——并行调用 Codex（OpenAI）和 Gemini（Google）评审同一份 diff，再让 Claude **聚焦两个模型的分歧**——这才是真正需要人来拍板的地方。一致 = 低信号，分歧 = 黄金。

@@ -382,7 +382,7 @@ ccg/
 ├── bin/ccg.js                   → Node CLI wrapper (install / uninstall / doctor / about)
 ├── scripts/install.sh           → ローカルクローンインストーラ
 ├── scripts/curl-install.sh      → リモートワンライナーインストーラ
-├── tests/test_ccg.sh            → L1–L6 用 99 回帰 + 敵対的テスト
+├── tests/test_ccg.sh            → L1–L6 用 111 回帰 + 敵対的テスト
 ├── README.md                    → 英語エントリーポイント (zh-CN / ja / ko ミラー)
 ├── docs/ARCHITECTURE.md         → 英語アーキテクチャドキュメント
 ├── docs/ARCHITECTURE.ja.md      → 本書

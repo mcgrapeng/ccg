@@ -2,8 +2,10 @@
 
 > Claude Code 슬래시 명령. 한 번 설치하고 diff 위에서 `/ccg`를 입력하세요.
 
-[![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
+[![npm downloads](https://img.shields.io/npm/dm/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
+[![GitHub stars](https://img.shields.io/github/stars/mcgrapeng/ccg.svg?style=social&label=Star)](https://github.com/mcgrapeng/ccg/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) ｜ [简体中文](README.zh-CN.md) ｜ [日本語](README.ja.md) ｜ **한국어**　·　[아키텍처 →](docs/ARCHITECTURE.ko.md)
@@ -160,6 +162,8 @@ source ~/.claude/commands/ccg.sh
 ccg_ledger_query "auth/login.go"
 # → "auth/login.go: 3 리뷰 · 최신 2026-05-23 (fix-required) · 2026-05-09 (merge) · 2026-04-28 (discuss)"
 ```
+
+같은 리뷰는 저장소 안 `.ccg/reports/<sha>_<utc-timestamp>.md`에 자기 완결적 markdown 보고서로도 영속화됩니다. Claude Code를 닫아도 재실행 없이 전체 출력(synthesis + Codex 원본 + Gemini 원본)을 나중에 다시 읽을 수 있습니다. 끄려면 `CCG_NO_REPORT=1`, 위치 변경은 `CCG_REPORT_DIR=<경로>`. (보고서를 git에 포함하지 않으려면 `.ccg/`를 `.gitignore`에 추가하는 것을 권장합니다.)
 
 ## 설정 (기본값으로 보통 충분)
 

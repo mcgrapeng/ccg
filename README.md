@@ -2,8 +2,10 @@
 
 > A Claude Code slash command. Install once, type `/ccg` on a diff.
 
-[![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
+[![npm downloads](https://img.shields.io/npm/dm/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
+[![GitHub stars](https://img.shields.io/github/stars/mcgrapeng/ccg.svg?style=social&label=Star)](https://github.com/mcgrapeng/ccg/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **English** ｜ [简体中文](README.zh-CN.md) ｜ [日本語](README.ja.md) ｜ [한국어](README.ko.md)　·　[Architecture →](docs/ARCHITECTURE.md)
@@ -161,6 +163,8 @@ source ~/.claude/commands/ccg.sh
 ccg_ledger_query "auth/login.go"
 # → "auth/login.go: 3 reviews · last 2026-05-23 (fix-required) · 2026-05-09 (merge) · 2026-04-28 (discuss)"
 ```
+
+The same review is also persisted as a self-contained markdown report at `.ccg/reports/<sha>_<utc-timestamp>.md` inside your repo. Useful when you close Claude Code and still want the full output — synthesis + raw Codex + raw Gemini — to be readable later without re-running. Set `CCG_NO_REPORT=1` to opt out, or `CCG_REPORT_DIR=<path>` to relocate. (Tip: add `.ccg/` to your `.gitignore` unless you want the reports tracked.)
 
 ## Configure (defaults are usually fine)
 

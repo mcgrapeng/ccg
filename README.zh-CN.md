@@ -2,8 +2,10 @@
 
 > Claude Code 的 slash command。装一次，在 diff 上输入 `/ccg`。
 
-[![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
+[![npm downloads](https://img.shields.io/npm/dm/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
+[![GitHub stars](https://img.shields.io/github/stars/mcgrapeng/ccg.svg?style=social&label=Star)](https://github.com/mcgrapeng/ccg/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) ｜ **简体中文** ｜ [日本語](README.ja.md) ｜ [한국어](README.ko.md)　·　[架构文档 →](docs/ARCHITECTURE.zh-CN.md)
@@ -160,6 +162,8 @@ source ~/.claude/commands/ccg.sh
 ccg_ledger_query "auth/login.go"
 # → "auth/login.go: 3 次评审 · 最近 2026-05-23 (fix-required) · 2026-05-09 (merge) · 2026-04-28 (discuss)"
 ```
+
+同一次评审还会保存为一份独立的 markdown 报告，写到仓库根目录下的 `.ccg/reports/<sha>_<utc-时间戳>.md`。Claude Code 一关，回头还能在仓库里直接翻出来，不用重跑。要关掉就 `CCG_NO_REPORT=1`；要换位置就 `CCG_REPORT_DIR=<路径>`。（建议把 `.ccg/` 加进 `.gitignore`，除非你想把报告也提交进 git。）
 
 ## 配置（默认值通常够用）
 

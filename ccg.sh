@@ -377,6 +377,11 @@ ccg_diff_capture() {
   fi
 
   printf '%s\n' "$diff_text" > "$out_file"
+  # Sidecar: persist the source label so later steps (e.g. ccg_persist_report)
+  # can read it across Bash invocations where env vars don't carry over.
+  local sidecar
+  sidecar="$(dirname "$out_file")/diff_source.txt"
+  printf '%s\n' "$source" > "$sidecar" 2>/dev/null || :
   local sz
   sz=$(wc -c <"$out_file" | tr -d ' ')
   echo "CCG_DIFF_OK=${sz}b"
@@ -593,6 +598,150 @@ ccg_ledger_query() {
   count=$(printf '%s\n' "$matches" | wc -l | tr -d ' ')
   echo "CCG_LEDGER_MATCH=$count needle=$needle"
   printf '%s\n' "$matches"
+}
+
+# ============================================================
+# Public: ccg_persist_report <workdir>
+#
+# Materializes a single self-contained Markdown report of the review under
+# <repo_root>/.ccg/reports/<sha-or-WIP>_<UTC-timestamp>.md, so the synthesis,
+# raw Codex output, and raw Gemini output survive Claude Code session closure.
+#
+# Inputs (from workdir):
+#   - synthesis.txt   (required — full Claude synthesis; ledger truncates separately)
+#   - diff.txt        (optional — used for file/line counts)
+#   - diff_source.txt (optional — written by ccg_diff_capture)
+#   - risk.txt        (optional — used for mode/score/reasons)
+#   - codex.result    (optional — appended as raw block)
+#   - gemini.result   (optional — appended as raw block)
+#
+# Environment overrides:
+#   CCG_NO_REPORT=1      → skip persistence entirely
+#   CCG_REPORT_DIR=<dir> → write to this dir instead of <repo>/.ccg/reports/
+#
+# Outputs:
+#   CCG_REPORT_OK=<path>     on success
+#   CCG_REPORT_SKIPPED=<why> when intentionally skipped (no-synthesis / disabled / not-a-git-repo)
+#   CCG_REPORT_FAIL=<why>    on filesystem error
+# ============================================================
+ccg_persist_report() {
+  local workdir="$1"
+
+  if [ "${CCG_NO_REPORT:-0}" = "1" ]; then
+    echo "CCG_REPORT_SKIPPED=disabled"
+    return 0
+  fi
+
+  local synth_file="$workdir/synthesis.txt"
+  if [ ! -s "$synth_file" ]; then
+    echo "CCG_REPORT_SKIPPED=no-synthesis"
+    return 0
+  fi
+
+  # Resolve target directory.
+  local out_dir
+  if [ -n "${CCG_REPORT_DIR:-}" ]; then
+    out_dir="$CCG_REPORT_DIR"
+  elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    out_dir="$(git rev-parse --show-toplevel 2>/dev/null)/.ccg/reports"
+  else
+    echo "CCG_REPORT_SKIPPED=not-a-git-repo"
+    return 0
+  fi
+
+  if ! mkdir -p "$out_dir" 2>/dev/null; then
+    echo "CCG_REPORT_FAIL=cannot-create-dir:$out_dir"
+    return 1
+  fi
+
+  # Compose filename: <sha-or-WIP>_<YYYYMMDD>-<HHMMSS>.md
+  local ts_iso ts_fname sha branch repo
+  ts_iso=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+  ts_fname=$(date -u +'%Y%m%d-%H%M%S')
+
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    repo=$(git rev-parse --show-toplevel 2>/dev/null)
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    sha=$(git rev-parse --short HEAD 2>/dev/null || echo "WIP")
+  else
+    repo=""; branch=""; sha="WIP"
+  fi
+
+  local report_path="$out_dir/${sha:-WIP}_${ts_fname}.md"
+
+  # Gather optional metadata.
+  local mode score reasons source_label
+  local diff_file="$workdir/diff.txt"
+  local risk_file="$workdir/risk.txt"
+  local source_file="$workdir/diff_source.txt"
+  local codex_result="$workdir/codex.result"
+  local gemini_result="$workdir/gemini.result"
+
+  if [ -s "$risk_file" ]; then
+    mode=$(grep '^CCG_RISK_MODE=' "$risk_file" | head -1 | cut -d= -f2)
+    score=$(grep '^CCG_RISK_SCORE=' "$risk_file" | head -1 | cut -d= -f2)
+    reasons=$(grep '^CCG_RISK_REASONS=' "$risk_file" | head -1 | cut -d= -f2-)
+  fi
+
+  if [ -s "$source_file" ]; then
+    source_label=$(head -1 "$source_file" | tr -d '\r\n')
+  else
+    source_label="${CCG_DIFF_SOURCE:-unknown}"
+  fi
+
+  local files_count=0 added=0 removed=0
+  if [ -s "$diff_file" ]; then
+    files_count=$(grep -cE '^diff --git ' "$diff_file" 2>/dev/null | head -1)
+    added=$(grep -cE '^\+[^+]' "$diff_file" 2>/dev/null | head -1)
+    removed=$(grep -cE '^-[^-]' "$diff_file" 2>/dev/null | head -1)
+    : "${files_count:=0}"; : "${added:=0}"; : "${removed:=0}"
+  fi
+
+  # Write report. Redact every section that came from outside (LLM output / diff).
+  {
+    printf '# ccg report\n\n'
+    printf -- '- **Generated**: %s\n' "$ts_iso"
+    [ -n "$repo" ] && printf -- '- **Repo**: %s\n' "$repo"
+    [ -n "$branch" ] && printf -- '- **Branch**: %s\n' "$branch"
+    printf -- '- **SHA**: %s\n' "$sha"
+    printf -- '- **Diff source**: %s\n' "$source_label"
+    printf -- '- **Files**: %s (+%s -%s)\n' "$files_count" "$added" "$removed"
+    if [ -n "$mode" ]; then
+      printf -- '- **Mode**: %s' "$mode"
+      [ -n "$score" ] && printf ' (risk=%s' "$score"
+      [ -n "$reasons" ] && printf ', reasons=%s' "$reasons"
+      [ -n "$score" ] && printf ')'
+      printf '\n'
+    fi
+
+    printf '\n---\n\n## Synthesis (Claude)\n\n'
+    _ccg_redact < "$synth_file"
+
+    printf '\n\n---\n\n## Codex (raw)\n\n'
+    if [ -s "$codex_result" ]; then
+      printf '```\n'
+      _ccg_redact < "$codex_result"
+      printf '\n```\n'
+    else
+      printf '_(no codex output)_\n'
+    fi
+
+    printf '\n---\n\n## Gemini (raw)\n\n'
+    if [ -s "$gemini_result" ]; then
+      printf '```\n'
+      _ccg_redact < "$gemini_result"
+      printf '\n```\n'
+    else
+      printf '_(no gemini output)_\n'
+    fi
+
+    printf '\n---\n\n*Generated by ccg. Re-render this evaluation by running `/ccg` in Claude Code.*\n'
+  } > "$report_path" 2>/dev/null || {
+    echo "CCG_REPORT_FAIL=write-failed:$report_path"
+    return 1
+  }
+
+  echo "CCG_REPORT_OK=$report_path"
 }
 
 # ============================================================
@@ -916,7 +1065,7 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then
   if [ "$#" -ge 1 ]; then
     cmd="$1"; shift
     case "$cmd" in
-      init|preflight|codex|gemini|cleanup|actual|usage|diff_capture|risk_score|ledger_record|ledger_query)
+      init|preflight|codex|gemini|cleanup|actual|usage|diff_capture|risk_score|ledger_record|ledger_query|persist_report)
         "ccg_$cmd" "$@"
         ;;
       *)

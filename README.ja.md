@@ -2,8 +2,10 @@
 
 > Claude Code のスラッシュコマンド。一度インストールして、diff の上で `/ccg` と入力するだけ。
 
-[![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
+[![npm downloads](https://img.shields.io/npm/dm/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
+[![GitHub stars](https://img.shields.io/github/stars/mcgrapeng/ccg.svg?style=social&label=Star)](https://github.com/mcgrapeng/ccg/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) ｜ [简体中文](README.zh-CN.md) ｜ **日本語** ｜ [한국어](README.ko.md)　·　[アーキテクチャ →](docs/ARCHITECTURE.ja.md)
@@ -161,6 +163,8 @@ source ~/.claude/commands/ccg.sh
 ccg_ledger_query "auth/login.go"
 # → "auth/login.go: 3 レビュー · 最新 2026-05-23 (fix-required) · 2026-05-09 (merge) · 2026-04-28 (discuss)"
 ```
+
+同じレビューはリポジトリ内の `.ccg/reports/<sha>_<utc-timestamp>.md` にも自己完結型の Markdown レポートとして保存されます。Claude Code を閉じても、再実行せずに完全な出力（synthesis + Codex 生 + Gemini 生）を後から読めます。無効化は `CCG_NO_REPORT=1`、保存先変更は `CCG_REPORT_DIR=<path>`。（レポートを git に入れたくなければ `.ccg/` を `.gitignore` に追加するのを推奨。）
 
 ## 設定（デフォルトで通常は十分）
 

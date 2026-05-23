@@ -29,6 +29,7 @@ That's the engineering truth. "Code divergence detector" is the [L7 product hook
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L6  Review ledger          ccg_ledger_record / ccg_ledger_query        │
 │      JSONL append-only, grep-able, secret-redacted                      │
+│      + ccg_persist_report → <repo>/.ccg/reports/<sha>_<ts>.md           │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L5  Risk-aware routing     ccg_risk_score                              │
 │      Pure-rule scoring on diff → cost / balanced / quality              │
@@ -172,6 +173,24 @@ The `synthesis` field is the first ~400 chars of Claude's combined verdict — l
 
 **Delete this layer:** ccg becomes 100% stateless. Every review starts from scratch. The L7 product story still works, but the long-term differentiation is gone.
 
+#### L6 companion — per-review Markdown reports
+
+The ledger optimizes for *aggregation* ("show me everything that touched `src/auth.ts`"), but answers to a different question — *full retrieval* ("what exactly did the models say in that review I ran 3 days ago?") — need a different surface. So `ccg_persist_report <workdir>` writes one self-contained Markdown file per evaluation to `<repo_root>/.ccg/reports/<sha-or-WIP>_<UTC-timestamp>.md`, containing:
+
+- Metadata header (timestamp, branch, SHA, diff source, mode, risk score & reasons, file/line counts)
+- Full Claude synthesis (no 400-char truncation — that's a ledger-only concern)
+- Raw Codex output (passed through `_ccg_redact`)
+- Raw Gemini output (passed through `_ccg_redact`)
+
+This addresses the "evaluation dies in chat" UX gap — once Claude Code session closes, the review text is otherwise gone unless the user manually copies it. Reports persist in the repo where they're discoverable via `find .ccg/reports/`, `gh pr comment --body-file`, IDE search, etc.
+
+Knobs:
+- `CCG_NO_REPORT=1` skips persistence entirely.
+- `CCG_REPORT_DIR=<path>` relocates the report (useful when running ccg outside a git repo).
+- Default location lives **inside the repo** rather than under XDG, because the report is per-repo evaluation context — the user who wants to attach it to a PR or share it with a teammate expects it in the repo tree, not in `~/.local/share/ccg/`.
+
+**Delete this companion:** ccg's L7 output becomes ephemeral again. The ledger query still works for "what touched X?" but answering "what did the model actually say?" requires re-running the review (and re-paying for it).
+
 ---
 
 ### L7 — Divergence synthesis (Claude-side)
@@ -188,7 +207,8 @@ The `synthesis` field is the first ~400 chars of Claude's combined verdict — l
 7. Calls `ccg_actual` (L4) to log real cost.
 8. **Synthesizes** the two `[FINDING]`-formatted outputs into AGREEMENT / DIVERGENCE / BLINDSPOT sections — this synthesis happens in Claude's head, not in code.
 9. Calls `ccg_ledger_record` (L6) with the synthesis excerpt.
-10. Calls `ccg_cleanup` (L1) to remove the workdir.
+10. Calls `ccg_persist_report` (L6 companion) to materialize the full Markdown report under `<repo>/.ccg/reports/`.
+11. Calls `ccg_cleanup` (L1) to remove the workdir.
 
 The protocol explicitly **downgrades** AGREEMENT visibility (one-liner each) and **promotes** DIVERGENCE (full expansion + "NEEDS HUMAN DECISION" tag). This is the product opinion: agreement is low-signal, divergence is the value.
 
@@ -246,11 +266,15 @@ ccg_actual <prompt> <result> codex|gemini                    ── L4
   └─ emits "NEEDS HUMAN DECISION" for irreconcilable divergence
        │
        ▼
-[Claude writes synthesis.txt — first 400 chars]              ── protocol
+[Claude writes synthesis.txt — full synthesis content]      ── protocol
        │
        ▼
 ccg_ledger_record "$CCG_DIR"                                 ── L6
-  └─ JSON-encode + redact synthesis + append to ledger.jsonl
+  └─ JSON-encode + redact synthesis (first 400 chars) + append to ledger.jsonl
+       │
+       ▼
+ccg_persist_report "$CCG_DIR"                                ── L6 companion
+  └─ write <repo>/.ccg/reports/<sha>_<ts>.md with full output
        │
        ▼
 ccg_cleanup "$CCG_DIR"                                       ── L1
@@ -380,7 +404,7 @@ ccg/
 ├── bin/ccg.js              → Node CLI wrapper (install / uninstall / doctor / about)
 ├── scripts/install.sh      → local-clone installer
 ├── scripts/curl-install.sh → remote one-liner installer
-├── tests/test_ccg.sh       → 99 regression + adversarial tests for L1–L6
+├── tests/test_ccg.sh       → 111 regression + adversarial tests for L1–L6
 ├── README.md               → English entry point (zh-CN / ja / ko mirror)
 ├── docs/ARCHITECTURE.md    → this file
 └── package.json            → npm publish manifest (@mcgrapeng/ccg)

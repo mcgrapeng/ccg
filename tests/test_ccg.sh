@@ -849,6 +849,153 @@ LDG=$(mktemp); rm -f "$LDG"
 out=$(CCG_LEDGER_LOG="$LDG" bash "$HELPER" ledger_query 2>&1)
 assert_match "$out" "CCG_LEDGER=no-data"
 
+# === 14. ccg_persist_report ====================================================
+# Persist a markdown report of the synthesis to <repo>/.ccg/reports/ so it
+# survives the Claude Code session. See ccg.sh:ccg_persist_report.
+
+# Helper: minimal workdir with synthesis.txt
+_setup_persist_workdir() {
+  local wd
+  wd=$(mktemp -d -t ccg.test.XXXXXXXX)
+  printf 'Test synthesis. DIVERGENCE on bcrypt: foo vs bar.\n' > "$wd/synthesis.txt"
+  echo "$wd"
+}
+
+# Helper: transient git repo with one committed file (gives us a HEAD sha)
+_setup_git_repo() {
+  local repo
+  repo=$(mktemp -d -t ccg.repo.XXXXXXXX)
+  (
+    cd "$repo"
+    git init -q
+    git config user.email "t@t"
+    git config user.name "T"
+    echo "x" > README.md
+    git add README.md
+    git commit -q -m "init"
+  )
+  echo "$repo"
+}
+
+t_start "14.1 persist_report writes report under <repo>/.ccg/reports/"
+fresh_source
+wd=$(_setup_persist_workdir); repo=$(_setup_git_repo)
+out=$(cd "$repo" && ccg_persist_report "$wd" 2>&1)
+report_path=$(echo "$out" | sed -n 's/^CCG_REPORT_OK=//p')
+if [ -f "$report_path" ] && case "$report_path" in *.ccg/reports/*) true ;; *) false ;; esac
+then t_pass
+else t_fail "out=$out report=$report_path"; fi
+rm -rf "$wd" "$repo"
+
+t_start "14.2 persist_report respects CCG_NO_REPORT=1"
+fresh_source
+wd=$(_setup_persist_workdir)
+out=$(CCG_NO_REPORT=1 ccg_persist_report "$wd" 2>&1)
+assert_match "$out" "CCG_REPORT_SKIPPED=disabled"
+rm -rf "$wd"
+
+t_start "14.3 persist_report skips when synthesis.txt is missing"
+fresh_source
+wd=$(mktemp -d -t ccg.test.XXXXXXXX)
+out=$(ccg_persist_report "$wd" 2>&1)
+assert_match "$out" "CCG_REPORT_SKIPPED=no-synthesis"
+rm -rf "$wd"
+
+t_start "14.4 persist_report skips when not in git repo and no override"
+fresh_source
+wd=$(_setup_persist_workdir); nongit=$(mktemp -d)
+out=$(cd "$nongit" && unset CCG_REPORT_DIR; ccg_persist_report "$wd" 2>&1)
+assert_match "$out" "CCG_REPORT_SKIPPED=not-a-git-repo"
+rm -rf "$wd" "$nongit"
+
+t_start "14.5 persist_report uses CCG_REPORT_DIR override even outside git"
+fresh_source
+wd=$(_setup_persist_workdir); nongit=$(mktemp -d); odir=$(mktemp -d)
+out=$(cd "$nongit" && CCG_REPORT_DIR="$odir" ccg_persist_report "$wd" 2>&1)
+report_path=$(echo "$out" | sed -n 's/^CCG_REPORT_OK=//p')
+if [ -f "$report_path" ] && case "$report_path" in "$odir"/*) true ;; *) false ;; esac
+then t_pass
+else t_fail "out=$out report=$report_path"; fi
+rm -rf "$wd" "$nongit" "$odir"
+
+t_start "14.6 persist_report redacts secrets in synthesis"
+fresh_source
+wd=$(mktemp -d -t ccg.test.XXXXXXXX)
+printf 'leaked sk-abcdefghijklmnopqrstuvwxyz123456 in synth\n' > "$wd/synthesis.txt"
+odir=$(mktemp -d)
+out=$(CCG_REPORT_DIR="$odir" ccg_persist_report "$wd" 2>&1)
+report_path=$(echo "$out" | sed -n 's/^CCG_REPORT_OK=//p')
+content=$(cat "$report_path")
+assert_nomatch "$content" "sk-abcdefghijklmnopqrstuvwxyz"
+rm -rf "$wd" "$odir"
+
+t_start "14.7 persist_report filename contains short-sha when repo has HEAD"
+fresh_source
+wd=$(_setup_persist_workdir); repo=$(_setup_git_repo)
+expected_sha=$(cd "$repo" && git rev-parse --short HEAD)
+out=$(cd "$repo" && ccg_persist_report "$wd" 2>&1)
+report_path=$(echo "$out" | sed -n 's/^CCG_REPORT_OK=//p')
+fname=$(basename "$report_path")
+case "$fname" in
+  "${expected_sha}"_*) t_pass ;;
+  *) t_fail "expected ^${expected_sha}_  got $fname" ;;
+esac
+rm -rf "$wd" "$repo"
+
+t_start "14.8 persist_report filename uses WIP outside git when forced via dir"
+fresh_source
+wd=$(_setup_persist_workdir); nongit=$(mktemp -d); odir=$(mktemp -d)
+out=$(cd "$nongit" && CCG_REPORT_DIR="$odir" ccg_persist_report "$wd" 2>&1)
+report_path=$(echo "$out" | sed -n 's/^CCG_REPORT_OK=//p')
+fname=$(basename "$report_path")
+case "$fname" in
+  WIP_*) t_pass ;;
+  *) t_fail "expected ^WIP_  got $fname" ;;
+esac
+rm -rf "$wd" "$nongit" "$odir"
+
+t_start "14.9 persist_report embeds risk metadata in report header"
+fresh_source
+wd=$(_setup_persist_workdir)
+printf 'CCG_RISK_SCORE=72\nCCG_RISK_MODE=quality\nCCG_RISK_REASONS=auth+35 size+5\n' > "$wd/risk.txt"
+odir=$(mktemp -d)
+out=$(CCG_REPORT_DIR="$odir" ccg_persist_report "$wd" 2>&1)
+report_path=$(echo "$out" | sed -n 's/^CCG_REPORT_OK=//p')
+content=$(cat "$report_path")
+assert_match "$content" "Mode.*quality.*risk=72"
+rm -rf "$wd" "$odir"
+
+t_start "14.10 persist_report reads diff_source.txt sidecar"
+fresh_source
+wd=$(_setup_persist_workdir)
+echo "upstream:origin/main" > "$wd/diff_source.txt"
+odir=$(mktemp -d)
+out=$(CCG_REPORT_DIR="$odir" ccg_persist_report "$wd" 2>&1)
+report_path=$(echo "$out" | sed -n 's/^CCG_REPORT_OK=//p')
+content=$(cat "$report_path")
+assert_match "$content" "Diff source.*upstream:origin/main"
+rm -rf "$wd" "$odir"
+
+t_start "14.11 dispatch supports persist_report subcommand"
+wd=$(_setup_persist_workdir); odir=$(mktemp -d)
+out=$(CCG_REPORT_DIR="$odir" bash "$HELPER" persist_report "$wd" 2>&1)
+assert_match "$out" "CCG_REPORT_OK="
+rm -rf "$wd" "$odir"
+
+t_start "14.12 diff_capture writes diff_source.txt sidecar"
+fresh_source
+repo=$(_setup_git_repo)
+echo "modified" >> "$repo/README.md"
+diff_out="$repo/.diff_out"
+out=$(cd "$repo" && ccg_diff_capture "$diff_out" 2>&1)
+sidecar="$(dirname "$diff_out")/diff_source.txt"
+if [ -s "$sidecar" ] && grep -q "worktree" "$sidecar"; then
+  t_pass
+else
+  t_fail "sidecar=$sidecar content=$(cat "$sidecar" 2>/dev/null) out=$out"
+fi
+rm -rf "$repo"
+
 
 # === 11. Real CLI smoke test (opt-in) ==========================================
 if [ "${REAL_CLI:-0}" = "1" ]; then

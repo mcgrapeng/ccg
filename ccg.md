@@ -30,6 +30,8 @@ description: Code-divergence detector. Run Codex+Gemini in parallel on a diff, t
 | `CCG_MAX_PROMPT_KB` | `100` | 防止把整个 repo 塞进 prompt |
 | `CCG_KEEP_ARTIFACTS` | `0` | `1` = 保留临时文件 |
 | `CCG_LEDGER_LOG` | `$XDG_DATA_HOME/ccg/ledger.jsonl` | 评审历史落盘位置（fallback `~/.local/share/ccg/`，自动迁移老路径 `~/.ccg/`） |
+| `CCG_NO_REPORT` | `0` | `1` = 跳过 `.ccg/reports/<sha>_<ts>.md` 持久化 |
+| `CCG_REPORT_DIR` | `<repo>/.ccg/reports` | 改写报告目录（默认 git repo 根下的 `.ccg/reports/`） |
 
 ### Mode → 默认模型映射
 
@@ -243,7 +245,7 @@ ccg_actual "$CCG_DIR/gemini.prompt" "$CCG_DIR/gemini.result" gemini
 
 ### 步骤 9. 落 ledger
 
-把上面综合输出的核心部分写到 `$CCG_DIR/synthesis.txt`（前 400 字符即可，ledger 自截断），然后：
+把上面综合输出的**完整**核心结论写到 `$CCG_DIR/synthesis.txt`（ledger 自动截断前 400 字符做摘要；持久化报告则使用完整内容），然后：
 
 ```bash
 CCG_DIR=<字面路径>
@@ -251,7 +253,22 @@ source ~/.claude/commands/ccg.sh
 ccg_ledger_record "$CCG_DIR"
 ```
 
-### 步骤 10. 清理
+### 步骤 10. 持久化报告到仓库（让评审结果在 session 结束后还能被找到）
+
+```bash
+CCG_DIR=<字面路径>
+source ~/.claude/commands/ccg.sh
+ccg_persist_report "$CCG_DIR"
+```
+
+- `CCG_REPORT_OK=<path>` → 把这个路径告诉用户："本次评审完整记录已写入 `<path>`"
+- `CCG_REPORT_SKIPPED=not-a-git-repo` → 跳过持久化（不在 git 仓库下），是正常情况，不要报错
+- `CCG_REPORT_SKIPPED=disabled` → 用户显式 `CCG_NO_REPORT=1`，不要报错
+- `CCG_REPORT_FAIL=<reason>` → 提示用户检查 `.ccg/reports/` 目录权限
+
+报告位置（默认）：`<repo_root>/.ccg/reports/<sha-or-WIP>_<UTC-timestamp>.md`。建议用户把 `.ccg/` 加入 `.gitignore`（首次出现时可顺手提醒一句）。
+
+### 步骤 11. 清理
 
 ```bash
 CCG_DIR=<字面路径>
@@ -285,6 +302,8 @@ ccg_ledger_query "src/auth.ts"                  # 这个文件历史评审过几
 | `CCG_*_FAIL=Model ... not registered / 503` | 代理不支持当前模型 | 显式 `CCG_CODEX_MODEL=<代理支持的型号>` |
 | `CCG_GEMINI_FAIL=error-leaked-to-stdout` | 代理把错误写到 stdout | 检查 `$CCG_DIR/gemini.err`（需 `CCG_KEEP_ARTIFACTS=1`） |
 | `CCG_*_FAIL=timeout-Ns` | CLI 超时 | 调大 `CCG_*_TIMEOUT` |
+| `CCG_REPORT_FAIL=cannot-create-dir:...` | `.ccg/reports/` 无法创建 | 检查仓库目录写权限或设 `CCG_REPORT_DIR=/path/you/own` |
+| `CCG_REPORT_SKIPPED=not-a-git-repo` | 当前目录不在 git 仓库里 | 这是预期行为，不报错；要持久化就 cd 进仓库或显式给 `CCG_REPORT_DIR` |
 
 ## 已知设计取舍
 

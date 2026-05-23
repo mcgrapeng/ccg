@@ -1,4 +1,4 @@
-# `/ccg` v3 — 代码分歧检测器
+# `/ccg` — 代码分歧检测器
 
 [![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
@@ -13,7 +13,7 @@
 
 ## 核心论点
 
-| 现有 AI 审查工具 | `/ccg` v3 |
+| 现有 AI 审查工具 | `/ccg` |
 |---|---|
 | 单一模型、单一视角 | 两个独立模型家族（训练数据不同） |
 | 输出是长篇审查报告 | 输出是**分歧地图** |
@@ -128,7 +128,7 @@ ccg_ledger_query "src/payment"
 
 ## diff 抓取很智能
 
-v3 按 4 个 source 依次回退：
+`/ccg` 按 4 个 source 依次回退：
 
 | Source | 何时触发 |
 |---|---|
@@ -137,7 +137,7 @@ v3 按 4 个 source 依次回退：
 | `upstream:<branch>` | 工作区干净，但分支领先 `@{u}`（已提交未推） |
 | `origin-head` | 没设上游，但有 `origin/HEAD` |
 
-选中的 source 会在 `CCG_DIFF_SOURCE` 报告出来，你永远知道在审什么。**提交工作不再让 `/ccg` 看不到**——v3 修了的真 bug。
+选中的 source 会在 `CCG_DIFF_SOURCE` 报告出来，你永远知道在审什么。**提交工作不再让 `/ccg` 看不到**。
 
 ## 成本透明
 
@@ -212,7 +212,7 @@ REAL_CLI=1 bash tests/test_ccg.sh     # +2 个真实 API 测试（会扣费）
 | Cursor `/review` | 单模型行内审查 | 修改建议 | ❌ |
 | zen-mcp-server | 多模型 MCP 网关 | 通用对话 | ❌（追求共识） |
 | Aider `/review` | 单模型 | 编辑感知建议 | ❌ |
-| **`/ccg` v3** | **多源分歧检测器** | **AGREEMENT / DIVERGENCE / BLINDSPOT** | **✅ 核心产品** |
+| **`/ccg`** | **多源分歧检测器** | **AGREEMENT / DIVERGENCE / BLINDSPOT** | **✅ 核心产品** |
 
 ## `/ccg` 闪光时刻
 

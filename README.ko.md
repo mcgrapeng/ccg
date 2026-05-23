@@ -1,4 +1,4 @@
-# `/ccg` v3 — Code Divergence Detector
+# `/ccg` — Code Divergence Detector
 
 [![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
@@ -13,7 +13,7 @@
 
 ## 핵심 명제
 
-| 기존 AI 리뷰 도구 | `/ccg` v3 |
+| 기존 AI 리뷰 도구 | `/ccg` |
 |---|---|
 | 단일 모델, 단일 관점 | 두 개의 독립적인 모델 패밀리(훈련 데이터 상이) |
 | 출력은 긴 리뷰 보고서 | 출력은 **분기 지도** |

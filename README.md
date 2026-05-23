@@ -1,4 +1,4 @@
-# `/ccg` v3 — Code Divergence Detector
+# `/ccg` — Code Divergence Detector
 
 [![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
@@ -13,7 +13,7 @@
 
 ## The thesis
 
-| Existing AI review tools | `/ccg` v3 |
+| Existing AI review tools | `/ccg` |
 |---|---|
 | Single model, single perspective | Two independent model families (different training data) |
 | Output is a long review report | Output is a **divergence map** |
@@ -128,7 +128,7 @@ ccg_ledger_query "src/payment"
 
 ## The diff capture is smart now
 
-v3 falls through 4 sources, in order:
+`/ccg` falls through 4 sources, in order:
 
 | Source | When it kicks in |
 |---|---|
@@ -137,7 +137,7 @@ v3 falls through 4 sources, in order:
 | `upstream:<branch>` | Worktree clean, but branch ahead of `@{u}` (committed-not-pushed) |
 | `origin-head` | No upstream set, but `origin/HEAD` exists |
 
-The selected source is reported as `CCG_DIFF_SOURCE` so you always know what's being reviewed. **Committing your work no longer hides it from `/ccg`** — a real bug fixed in v3.
+The selected source is reported as `CCG_DIFF_SOURCE` so you always know what's being reviewed. **Committing your work no longer hides it from `/ccg`**.
 
 ## Cost transparency
 
@@ -212,7 +212,7 @@ REAL_CLI=1 bash tests/test_ccg.sh     # +2 live API tests (incurs cost)
 | Cursor `/review` | Single-model inline | Suggestions | ❌ |
 | zen-mcp-server | Multi-model MCP gateway | Generic chat | ❌ (consensus) |
 | Aider `/review` | Single-model | Edit-aware suggestions | ❌ |
-| **`/ccg` v3** | **Multi-source divergence detector** | **AGREEMENT / DIVERGENCE / BLINDSPOT** | **✅ core product** |
+| **`/ccg`** | **Multi-source divergence detector** | **AGREEMENT / DIVERGENCE / BLINDSPOT** | **✅ core product** |
 
 ## When `/ccg` shines
 

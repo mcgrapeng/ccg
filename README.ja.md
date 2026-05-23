@@ -1,4 +1,4 @@
-# `/ccg` v3 — Code Divergence Detector
+# `/ccg` — Code Divergence Detector
 
 [![Tests](https://img.shields.io/badge/tests-99%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
@@ -13,7 +13,7 @@
 
 ## 主張
 
-| 既存の AI レビューツール | `/ccg` v3 |
+| 既存の AI レビューツール | `/ccg` |
 |---|---|
 | 単一モデル、単一視点 | 2 つの独立したモデルファミリー（訓練データが異なる） |
 | 出力は長文レビューレポート | 出力は **分岐マップ** |

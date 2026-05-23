@@ -1,0 +1,13 @@
+# Source of truth for what's included is package.json#files.
+# Anything not in files[] is excluded by default. This file blacklists extras
+# in case files[] becomes too permissive in the future.
+tests/
+.github/
+.gitignore
+.npmignore
+ccg.md.bak
+*.tgz
+*.test.*
+.cache/
+node_modules/
+.DS_Store

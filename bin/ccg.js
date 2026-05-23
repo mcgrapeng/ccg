@@ -155,6 +155,184 @@ function cmdDoctor({ silent = false, exitOnFail = true } = {}) {
   if (exitOnFail && anyFail) process.exitCode = 1;
 }
 
+// ──────────────────────────────────────────────────────────────
+// `ccg about` — 7-layer capability probe
+//
+// Shows what ccg can do in this environment, not what the README claims.
+// Each layer is independently usable; layers below answer real engineering
+// problems even if you never touch the divergence-detection layer above.
+// ──────────────────────────────────────────────────────────────
+function cmdAbout() {
+  const xdg = {
+    config: process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"),
+    cache: process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"),
+    data: process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local/share"),
+  };
+  const cacheDir = path.join(xdg.cache, "ccg", "cache");
+  const dataDir = path.join(xdg.data, "ccg");
+  const ledger = path.join(dataDir, "ledger.jsonl");
+  const usageLog = path.join(dataDir, "usage.log");
+
+  const hasCodex = which("codex");
+  const hasGemini = which("gemini");
+  const hasGeminiKey = Boolean(
+    process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim(),
+  );
+  const hasGit = which("git");
+  const installedSlash =
+    fs.existsSync(path.join(TARGET_DIR, "ccg.sh")) &&
+    fs.existsSync(path.join(TARGET_DIR, "ccg.md"));
+  const fileExists = (p) => {
+    try { return fs.statSync(p).isFile(); } catch { return false; }
+  };
+  const countLines = (p) => {
+    try {
+      return fs
+        .readFileSync(p, "utf8")
+        .split("\n")
+        .filter((line) => line.trim().length > 0).length;
+    } catch { return 0; }
+  };
+  const dirSize = (p) => {
+    try {
+      let total = 0;
+      for (const entry of fs.readdirSync(p, { withFileTypes: true })) {
+        const full = path.join(p, entry.name);
+        if (entry.isFile()) total += fs.statSync(full).size;
+      }
+      return total;
+    } catch { return 0; }
+  };
+  const fmtSize = (b) =>
+    b < 1024 ? `${b}B` : b < 1024 ** 2 ? `${(b / 1024).toFixed(1)}KB` : `${(b / 1024 ** 2).toFixed(1)}MB`;
+
+  const ledgerEntries = countLines(ledger);
+  const usageEntries = countLines(usageLog);
+  const cacheSize = dirSize(cacheDir);
+
+  // ── header ────────────────────────────────────────────
+  console.log(`${C.bold}@mcgrapeng/ccg${C.reset} v${PKG.version}`);
+  console.log(`${C.dim}A production-grade orchestrator for using Codex + Gemini CLI from inside Claude Code.${C.reset}`);
+  console.log("");
+  console.log(`Source:  ${PKG.repository.url.replace(/^git\+/, "").replace(/\.git$/, "")}`);
+  console.log("");
+
+  // ── 7-layer capability matrix ─────────────────────────
+  console.log(`${C.bold}7 layers of capability${C.reset}`);
+  console.log(`${C.dim}(Each layer is useful on its own. The famous "divergence detection" is just L7.)${C.reset}`);
+  console.log("");
+
+  const layers = [
+    {
+      id: "L1",
+      name: "Safe CLI scheduling",
+      solves: "timeouts / stdin preservation / secret redaction / cleanup safety",
+      status: "always-on",
+      detail: `cleanup, mktemp 700, 7-pattern redaction (sk-/AIza/Bearer/JWT/ghp_/AKIA/Slack)`,
+    },
+    {
+      id: "L2",
+      name: "Content-addressed cache",
+      solves: "stop paying for the same prompt twice during debugging",
+      status: process.env.CCG_NO_CACHE === "1" ? "disabled (CCG_NO_CACHE=1)" : "always-on",
+      detail: `SHA-256 prompt + model key, 24h TTL, failed calls NOT cached.  Current: ${fmtSize(cacheSize)} at ${cacheDir}`,
+    },
+    {
+      id: "L3",
+      name: "Smart diff capture",
+      solves: "captures changes even after you've committed them",
+      status: hasGit ? "ready" : "git missing",
+      detail: "4-level fallback: worktree → staged → upstream → origin-head (reports CCG_DIFF_SOURCE)",
+    },
+    {
+      id: "L4",
+      name: "Usage tracking & cost telemetry",
+      solves: "see how much you spend per month / per model",
+      status: "always-on",
+      detail: `${usageEntries} call(s) logged at ${usageLog}.  Run: ${C.cyan}source ccg.sh && ccg_usage --this-month${C.reset}`,
+    },
+    {
+      id: "L5",
+      name: "Risk-aware auto routing",
+      solves: "auto-pick cost/balanced/quality based on path+content+size",
+      status: "always-on",
+      detail: "Pure rule scoring (no LLM). Path matches auth/payment → +25..+40; SQL+interp → +30; docs only → -40",
+    },
+    {
+      id: "L6",
+      name: "Review ledger",
+      solves: "stateless AI can't tell you 'what did the model say last time on src/auth.ts?'",
+      status: "always-on",
+      detail: `${ledgerEntries} review(s) logged at ${ledger}.  Query: ${C.cyan}ccg_ledger_query "src/auth"${C.reset}`,
+    },
+    {
+      id: "L7",
+      name: "Divergence detection (synthesis)",
+      solves: "single-model review can't see its own blind spots",
+      status:
+        hasCodex && hasGemini && hasGeminiKey
+          ? "full (Codex + Gemini)"
+          : hasCodex || (hasGemini && hasGeminiKey)
+          ? "degraded (single source)"
+          : "unavailable",
+      detail: "Codex + Gemini → same prompt → Claude surfaces AGREEMENT / DIVERGENCE / BLINDSPOT",
+    },
+  ];
+
+  for (const layer of layers) {
+    const isFull =
+      layer.status.includes("ready") ||
+      layer.status === "always-on" ||
+      layer.status.startsWith("full");
+    const isDegraded = layer.status.startsWith("degraded") || layer.status.includes("disabled");
+    const isFail =
+      layer.status.includes("missing") || layer.status.includes("unavailable");
+
+    const dot = isFull
+      ? `${C.green}●${C.reset}`
+      : isDegraded
+      ? `${C.yellow}●${C.reset}`
+      : isFail
+      ? `${C.red}●${C.reset}`
+      : `${C.dim}●${C.reset}`;
+    console.log(`  ${dot} ${C.bold}${layer.id}${C.reset}  ${layer.name}  ${C.dim}— ${layer.status}${C.reset}`);
+    console.log(`     ${C.dim}why:${C.reset}    ${layer.solves}`);
+    console.log(`     ${C.dim}how:${C.reset}    ${layer.detail}`);
+    console.log("");
+  }
+
+  // ── environment ─────────────────────────────────────────
+  console.log(`${C.bold}Environment${C.reset}`);
+  const envRow = (label, status, hint) => {
+    const dot = status ? `${C.green}✓${C.reset}` : `${C.red}✗${C.reset}`;
+    console.log(`  ${dot}  ${label}${status ? "" : `  ${C.dim}→ ${hint}${C.reset}`}`);
+  };
+  envRow("Claude Code slash command installed", installedSlash, `run: ${C.cyan}ccg install${C.reset}`);
+  envRow("Codex CLI", hasCodex, "npm i -g @openai/codex");
+  envRow("Gemini CLI", hasGemini, "npm i -g @google/gemini-cli");
+  envRow("GEMINI_API_KEY env var", hasGeminiKey, 'add to ~/.zshenv: export GEMINI_API_KEY="..."');
+  envRow("git available", hasGit, "install git for diff capture");
+  console.log("");
+
+  // ── storage ─────────────────────────────────────────────
+  console.log(`${C.bold}Storage (XDG)${C.reset}`);
+  console.log(`  config:  ${path.join(xdg.config, "ccg")}/${fileExists(path.join(xdg.config, "ccg/config.json")) ? "" : `  ${C.dim}(no config.json yet)${C.reset}`}`);
+  console.log(`  cache:   ${cacheDir}  ${C.dim}(${fmtSize(cacheSize)})${C.reset}`);
+  console.log(`  data:    ${dataDir}  ${C.dim}(ledger=${ledgerEntries}, usage=${usageEntries})${C.reset}`);
+  console.log("");
+
+  // ── quick reference ────────────────────────────────────
+  console.log(`${C.bold}Common commands${C.reset}`);
+  console.log(`  ${C.cyan}/ccg${C.reset}                                          ${C.dim}(inside Claude Code) full divergence review on current diff${C.reset}`);
+  console.log(`  ${C.cyan}source ~/.claude/commands/ccg.sh${C.reset}`);
+  console.log(`    ${C.cyan}ccg_usage --this-month${C.reset}                      ${C.dim}month-to-date cost${C.reset}`);
+  console.log(`    ${C.cyan}ccg_ledger_query "path/fragment"${C.reset}             ${C.dim}past reviews touching a path${C.reset}`);
+  console.log(`    ${C.cyan}ccg_risk_score <diff_file>${C.reset}                   ${C.dim}preview routing decision${C.reset}`);
+  console.log("");
+  console.log(`  ${C.cyan}ccg doctor${C.reset}                                    ${C.dim}re-check environment${C.reset}`);
+  console.log(`  ${C.cyan}ccg uninstall${C.reset}                                 ${C.dim}remove slash command (user data preserved)${C.reset}`);
+}
+
 function cmdVersion() {
   console.log(PKG.version);
 }
@@ -165,6 +343,7 @@ function cmdHelp() {
 ${C.bold}Usage${C.reset}
   npx @mcgrapeng/ccg install      Install /ccg into ~/.claude/commands/
   npx @mcgrapeng/ccg uninstall    Remove the slash command
+  npx @mcgrapeng/ccg about        What can ccg do? 7-layer capability probe
   npx @mcgrapeng/ccg doctor       Verify Codex / Gemini / API key
   npx @mcgrapeng/ccg version      Print version
   npx @mcgrapeng/ccg help         Show this message
@@ -186,6 +365,9 @@ const dispatch = {
   remove: cmdUninstall,
   doctor: cmdDoctor,
   preflight: cmdDoctor,
+  about: cmdAbout,
+  capabilities: cmdAbout,
+  caps: cmdAbout,
   version: cmdVersion,
   "-v": cmdVersion,
   "--version": cmdVersion,

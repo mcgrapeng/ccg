@@ -28,14 +28,28 @@ ccg is a `/ccg` slash command for Claude Code that fixes all three. On any diff,
 
 ## When to use ccg
 
-| Scenario | Use ccg? | Why |
-|---|---|---|
-| Touching auth / payments / migrations / crypto | ✅ Yes | Different training data catches different bugs. Worth $0.04. |
-| Solo dev or 2-person team, no second reviewer | ✅ Yes | Closest thing to "another pair of eyes" |
-| Pre-merge sanity check on a 200-line PR | ✅ Yes | Risk-router picks the right model automatically |
-| Renaming a variable | ❌ No | Just commit |
-| Docs-only edit | ❌ No | Risk router auto-downgrades to ~$0.0007 but truly not needed |
-| Want streaming chat with one model | ❌ No | Use codex/gemini CLI directly |
+The trigger isn't a *domain* — it's a *feeling*. Use ccg when, looking at your own diff, you catch yourself thinking:
+
+| Inner monologue | Use ccg? |
+|---|---|
+| "If I get this wrong, I'll get paged at 3am." | ✅ Yes |
+| "This is a judgment call — no obviously right answer." | ✅ Yes |
+| "I wish someone else would look at this first." | ✅ Yes |
+| "I just renamed a variable." | ❌ No |
+| "Docs-only change." | ❌ No |
+| "I want streaming chat with one model." | ❌ No (use the CLI directly) |
+
+**Examples across domains** — none of these are auth/crypto, all of them are real "two senior engineers would disagree" moments:
+
+- **Social platforms** — re-ranking the feed with a new engagement signal · comment-thread fan-out strategy · A/B test bucketing logic · anti-abuse rate-limit policy · graph-DB schema for follow relationships
+- **Data / AI infra** — switching embedding model (do you re-index?) · changing chunking strategy · RAG retrieval scoring · prompt-injection defense layering
+- **Frontend** — SSR vs ISR vs RSC for a new page · cache invalidation strategy · state-management refactor · accessibility trade-offs
+- **API design** — cursor vs offset pagination · error response model · versioning approach · idempotency-key handling
+- **Distributed systems** — timeout/retry policy · cache TTL vs event-driven invalidation · partition tolerance trade-off · leader-election semantics
+- **Database** — multi-step migration sequencing · index choice on a hot path · transaction isolation level · soft-delete vs hard-delete
+- **Security** — yes, auth / crypto / payments too — but just one of many domains
+
+**The pattern:** any change where a reasonable engineer might pick option A and another reasonable engineer might pick option B. That's when divergence detection earns its $0.04.
 
 ## Why ccg (vs everything else)
 

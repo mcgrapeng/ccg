@@ -29,7 +29,8 @@ That's the engineering truth. "Code divergence detector" is the [L7 product hook
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L6  Review ledger          ccg_ledger_record / ccg_ledger_query        │
 │      JSONL append-only, grep-able, secret-redacted                      │
-│      + ccg_persist_report → <repo>/.ccg/reports/<sha>_<ts>.md           │
+│      + ccg_persist_report  → <repo>/.ccg/reports/<sha>_<ts>.md          │
+│      + ccg_ledger_context  → history.txt injected into next prompt      │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L5  Risk-aware routing     ccg_risk_score                              │
 │      Pure-rule scoring on diff → cost / balanced / quality              │
@@ -173,6 +174,38 @@ The `synthesis` field is the first ~400 chars of Claude's combined verdict — l
 
 **Delete this layer:** ccg becomes 100% stateless. Every review starts from scratch. The L7 product story still works, but the long-term differentiation is gone.
 
+#### L6 consumer — `ccg_ledger_context` (closes the loop)
+
+Without a consumer, the ledger is a write-only diary — every review starts from scratch even though the ledger holds the answer to "what did we already argue about on this file?". `ccg_ledger_context <diff_file>` is the bidirectional half:
+
+1. Extract unique paths from the diff (`diff --git a/<path>` headers).
+2. Grep the ledger for JSON-quoted `"<path>"` occurrences (fixed-string match, so `src/foo.ts` won't collide with `src/foobar.ts`).
+3. Dedup, take the last `CCG_HISTORY_MAX` (default 3) most-recent matches.
+4. Render to `<workdir>/history.txt` as a structured Markdown block.
+
+The protocol layer (`ccg.md` step 2.5) splices `history.txt` into both Codex and Gemini prompts before the diff. Each reviewer therefore sees:
+
+```
+=== PRIOR REVIEWS (last 3 entries touching these paths) ===
+- [2026-05-20T12:00:00Z] sha=ghi9abc mode=quality lines=+8-1
+  paths: ["auth/login.go","auth/session.go"]
+  synthesis: BLINDSPOT: error logging missing. fix-required.
+...
+```
+
+Why this matters:
+- **Recurring patterns surface.** "Last time we argued about constant-time compare — is this PR repeating that?"
+- **Unresolved `fix-required` items don't decay.** If a prior verdict said `fix-required` and the new diff doesn't address it, both reviewers can flag the gap.
+- **Two-call cost stays flat.** No extra LLM call; `ccg_ledger_context` is a pure shell function (grep + sed). Marginal cost: tens of milliseconds.
+
+**Cross-shell footgun (worth documenting):** `ccg.sh` is sourced into whatever shell Claude Code's Bash tool runs (bash for default-bash users, **zsh** for default-zsh users). In zsh, `local var` *without* `=` prints the variable's existing value to stdout. If the `local` declarations had stayed inside the rendering loop, iteration 2 onward would have leaked iteration 1's values into `history.txt`. The fix: declare all loop-mutated locals once *outside* the while loop. The regression is locked in by test 15.9.
+
+Knobs:
+- `CCG_NO_HISTORY=1` skips the consumer entirely (useful when you want a *single*-perspective baseline review).
+- `CCG_HISTORY_MAX=<n>` caps surfaced entries (default 3; larger N inflates prompt size).
+
+**Delete this companion:** ccg goes back to stateless. L6 reverts to a write-only diary — moat by data accumulation, but no compounding leverage within a session.
+
 #### L6 companion — per-review Markdown reports
 
 The ledger optimizes for *aggregation* ("show me everything that touched `src/auth.ts`"), but answers to a different question — *full retrieval* ("what exactly did the models say in that review I ran 3 days ago?") — need a different surface. So `ccg_persist_report <workdir>` writes one self-contained Markdown file per evaluation to `<repo_root>/.ccg/reports/<sha-or-WIP>_<UTC-timestamp>.md`, containing:
@@ -245,7 +278,13 @@ ccg_risk_score "$CCG_DIR/diff.txt"                           ── L5
   └─ Claude exports CCG_MODE accordingly
        │
        ▼
-[Claude writes codex.prompt + gemini.prompt — same content]  ── protocol
+ccg_ledger_context "$CCG_DIR/diff.txt"                       ── L6 consumer
+  └─ greps ledger for prior reviews touching same paths
+  └─ writes history.txt for prompt embedding (≤ CCG_HISTORY_MAX entries)
+       │
+       ▼
+[Claude writes codex.prompt + gemini.prompt — same content,  ── protocol
+ with history.txt prepended when present]
        │
        ▼
 ccg_codex   ─ parallel ─  ccg_gemini                         ── L1 + L2
@@ -367,6 +406,7 @@ These are the choices that look weird at first but have specific reasons. Docume
 | `~/.ccg/` migration is non-destructive (`mv` not `cp`) | Could leave orphans | Old `~/.ccg/` users explicitly opted in via env vars; copying data leaves duplicates. We move once on first encounter; the dir is removed only if empty. |
 | `ccg_cleanup` rejects symlinks, not just `..` | "Path traversal" is the usual scare | `mktemp` already prevents `..`. Symlinks are the actual attack surface (TOCTOU race where symlink swaps mid-cleanup). |
 | Slash command protocol lives in `ccg.md`, not in code | Code-as-documentation seems cleaner | Claude reads `ccg.md` as the protocol spec. Bash code can't be Claude's prompt; that's the whole point of slash commands. Splitting protocol (md) from primitives (sh) is the correct boundary. |
+| `local var=` (with `=`) is mandatory inside loop bodies | Bash treats `local var` and `local var=` identically | zsh's `local var` (no `=`) *prints* the variable's existing value. ccg.sh is sourced by zsh users via Claude Code's Bash tool — leaking iteration N-1's values into a prompt or output file is a real bug. Test 15.9 guards this. |
 
 ---
 
@@ -386,10 +426,11 @@ What ccg deliberately does **not** try to do, and why.
 
 Marketing positioning says: **divergence detection** (L7).
 
-The engineering moat is **L6 (ledger) + L4 (usage)**:
+The engineering moat is **L6 (ledger + consumer) + L4 (usage)**:
 
 - L7 can be copied in a week. Any team that knows about `gpt-5-mini` + `gemini-2.5-flash` can run the same trick.
 - L6 + L4 produce **per-user accumulating data**. After 6 months, a heavy user has a personal historical record that no competitor can replicate — they'd be starting from review #1.
+- The `ccg_ledger_context` consumer (added 2026-05) is what makes that data *compound* within a session: each review uses the prior reviews as context. Without it, the ledger was a write-only diary; with it, every review on a touched file builds on the last.
 
 If you're prioritizing what to harden first, harden L6 + L4 first.
 
@@ -404,7 +445,7 @@ ccg/
 ├── bin/ccg.js              → Node CLI wrapper (install / uninstall / doctor / about)
 ├── scripts/install.sh      → local-clone installer
 ├── scripts/curl-install.sh → remote one-liner installer
-├── tests/test_ccg.sh       → 111 regression + adversarial tests for L1–L6
+├── tests/test_ccg.sh       → 121 regression + adversarial tests for L1–L6
 ├── README.md               → English entry point (zh-CN / ja / ko mirror)
 ├── docs/ARCHITECTURE.md    → this file
 └── package.json            → npm publish manifest (@mcgrapeng/ccg)

@@ -32,6 +32,8 @@ description: Code-divergence detector. Run Codex+Gemini in parallel on a diff, t
 | `CCG_LEDGER_LOG` | `$XDG_DATA_HOME/ccg/ledger.jsonl` | 评审历史落盘位置（fallback `~/.local/share/ccg/`，自动迁移老路径 `~/.ccg/`） |
 | `CCG_NO_REPORT` | `0` | `1` = 跳过 `.ccg/reports/<sha>_<ts>.md` 持久化 |
 | `CCG_REPORT_DIR` | `<repo>/.ccg/reports` | 改写报告目录（默认 git repo 根下的 `.ccg/reports/`） |
+| `CCG_NO_HISTORY` | `0` | `1` = 跳过把过去同路径的评审摘要注入 prompt（步骤 2.5） |
+| `CCG_HISTORY_MAX` | `3` | 注入 prompt 的历史评审条数上限 |
 
 ### Mode → 默认模型映射
 
@@ -90,6 +92,22 @@ ccg_diff_capture "$CCG_DIR/diff.txt"
 
 **Claude 必须在最终输出中显示对比的是哪个 source，让用户知道评审的范围。**
 
+### 步骤 2.5. 历史评审注入（让 ledger 不再 write-only）
+
+```bash
+CCG_DIR=<字面路径>
+source ~/.claude/commands/ccg.sh
+ccg_ledger_context "$CCG_DIR/diff.txt"
+```
+
+读 `CCG_HISTORY_*`：
+- `CCG_HISTORY_OK=<n>_matches_<max>_max` + `CCG_HISTORY_FILE=<path>` → 文件已写入 `<CCG_DIR>/history.txt`，**步骤 4 写 prompt 时必须把这段内容拼到 diff 前面**
+- `CCG_HISTORY_NONE=0_matches` → ledger 里没匹配（首次评审这些文件）；正常情况，prompt 不带 history 块
+- `CCG_HISTORY_SKIPPED=<no-ledger|no-diff|disabled|no-paths-in-diff>` → 跳过即可，不报错
+- `CCG_HISTORY_FAIL=...` → 临时文件写不进；忽略并继续（这一步是增强信号，不是必需）
+
+> 设计立场：L6 ledger 不再是日记本——每次评审都把"过去对同一文件的判断"作为先验喂给 Codex/Gemini。recurring patterns、未解决的 fix-required 都进入第一现场。环境变量 `CCG_NO_HISTORY=1` 可关闭；`CCG_HISTORY_MAX` 改条数（默认 3）。
+
 ### 步骤 3. 风险打分 + 自动选 mode（仅 B 模式）
 
 ```bash
@@ -130,6 +148,8 @@ detail: <2-4 行解释，必须可独立读懂>
 
 不要寒暄，不要在外面加任何文字。如果没有发现问题，FINDINGS 段落留空，但格式仍要保留。
 
+<如果 step 2.5 产出了 history.txt，把它的完整内容贴在这里，标题"=== PRIOR REVIEWS ===" 自带>
+
 待评审的 diff（source: <CCG_DIFF_SOURCE>）：
 
 <贴入 diff 内容>
@@ -139,7 +159,7 @@ detail: <2-4 行解释，必须可独立读懂>
 - `<CCG_DIR>/codex.prompt`
 - `<CCG_DIR>/gemini.prompt`
 
-两份 prompt 内容**完全相同**。让两个独立大脑产生差异——这正是分歧检测的来源。
+两份 prompt 内容**完全相同**（包括 history 段——两个 reviewer 看相同的过往）。让两个独立大脑产生差异——这正是分歧检测的来源。
 
 ### 步骤 5. 并行调用 CLI（单消息两个 Bash 调用）
 
@@ -304,10 +324,13 @@ ccg_ledger_query "src/auth.ts"                  # 这个文件历史评审过几
 | `CCG_*_FAIL=timeout-Ns` | CLI 超时 | 调大 `CCG_*_TIMEOUT` |
 | `CCG_REPORT_FAIL=cannot-create-dir:...` | `.ccg/reports/` 无法创建 | 检查仓库目录写权限或设 `CCG_REPORT_DIR=/path/you/own` |
 | `CCG_REPORT_SKIPPED=not-a-git-repo` | 当前目录不在 git 仓库里 | 这是预期行为，不报错；要持久化就 cd 进仓库或显式给 `CCG_REPORT_DIR` |
+| `CCG_HISTORY_SKIPPED=no-ledger` | 还没攒下评审历史 | 这是预期行为；多跑几次 `/ccg` 后历史就有了 |
+| `CCG_HISTORY_NONE=0_matches` | 这次 diff 触及的文件之前没评审过 | 这是预期行为，prompt 里不带 history 块 |
 
 ## 已知设计取舍
 
 - **Divergence over consensus**：放弃"给一份完整 review 报告"，转向"标记需要人裁决的点"。AGREEMENT 段意识形态上**故意降级**——单源 Claude 也能发现，无新增信号
+- **Ledger 双向化**：v3.x 起 ledger 不再只写——`ccg_ledger_context` 在每次评审前把"过去对同一文件的判断"作为先验注入 prompt。recurring patterns 和未解决的 fix-required 进入第一现场，不再随 session 关闭而蒸发。这是把 L6 从"日记本"升级成"结构化记忆"。
 - **同 prompt 双投喂**：训练数据差异自然产生多样性，比拍脑袋分工（codex=arch、gemini=ux）更可靠
 - **24h 缓存**：调试同段代码反复跑时省 90% 费用；改了代码 prompt hash 自然变了，无需手动失效
 - **prompt 大小硬限**：100KB ≈ 32k token，比 codex/gemini context window 小一个数量级，防止把 repo 塞进去

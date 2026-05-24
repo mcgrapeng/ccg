@@ -19,6 +19,7 @@
 #   ccg_usage [--this-month|--all]    → summarize $XDG_DATA_HOME/ccg/usage.log
 #   ccg_ledger_record <workdir>       → append JSONL row to $XDG_DATA_HOME/ccg/ledger.jsonl
 #   ccg_ledger_query [path-substring] → find prior reviews touching path
+#   ccg_ledger_context <diff_file>    → write history.txt of prior reviews for prompt embedding
 #   ccg_cleanup <dir>                 → rm -rf the workdir (skipped if CCG_KEEP_ARTIFACTS=1)
 #
 # Configuration via environment variables:
@@ -35,6 +36,8 @@
 #   CCG_MAX_PROMPT_KB   — Reject prompts larger than this (default: 100)
 #   CCG_USAGE_LOG       — Override usage log path (default: $XDG_DATA_HOME/ccg/usage.log)
 #   CCG_LEDGER_LOG      — Override ledger path (default: $XDG_DATA_HOME/ccg/ledger.jsonl)
+#   CCG_NO_HISTORY      — Set to 1 to skip embedding prior-review history into prompts
+#   CCG_HISTORY_MAX     — Max prior-review entries to surface (default: 3)
 #
 # Storage paths follow XDG Base Directory Specification:
 #   * Cache:   $XDG_CACHE_HOME/ccg          (fallback: ~/.cache/ccg)
@@ -601,6 +604,152 @@ ccg_ledger_query() {
 }
 
 # ============================================================
+# Public: ccg_ledger_context <diff_file>
+#
+# Turns the write-only ledger into a *consumer*: extracts touched paths from
+# the diff, looks up the last N prior reviews that touched any of those paths,
+# and writes a Markdown block to <dirname(diff_file)>/history.txt so the
+# protocol layer (ccg.md) can splice it into the prompt as prior context.
+#
+# This is the bidirectional half of L6 — without it, ledger is a diary that
+# only writes, never reads. The protocol embeds history.txt into both Codex
+# and Gemini prompts so reviewers see "what we argued about last time on
+# these files." Recurring patterns and unresolved fix-required items become
+# first-class signal instead of being lost between sessions.
+#
+# Inputs:
+#   $1 — path to diff file (from ccg_diff_capture)
+#
+# Environment:
+#   CCG_NO_HISTORY=1     → skip entirely (privacy / debugging)
+#   CCG_HISTORY_MAX      → max entries to surface (default: 3)
+#   CCG_LEDGER_LOG       → override ledger path (shared with ccg_ledger_record)
+#
+# Outputs (stdout, KEY=VAL):
+#   CCG_HISTORY_OK=<n>_entries        → wrote history.txt with n records
+#   CCG_HISTORY_FILE=<path>           → resolved sidecar path
+#   CCG_HISTORY_NONE=0_matches        → ledger exists but no path overlap
+#   CCG_HISTORY_SKIPPED=<reason>      → disabled / no-diff / no-ledger / no-paths-in-diff
+#   CCG_HISTORY_FAIL=<reason>         → filesystem error
+# ============================================================
+ccg_ledger_context() {
+  local diff_file="$1"
+
+  if [ "${CCG_NO_HISTORY:-0}" = "1" ]; then
+    echo "CCG_HISTORY_SKIPPED=disabled"
+    return 0
+  fi
+
+  if [ -z "$diff_file" ] || [ ! -s "$diff_file" ]; then
+    echo "CCG_HISTORY_SKIPPED=no-diff"
+    return 0
+  fi
+
+  local ledger="${CCG_LEDGER_LOG:-$(_ccg_xdg_data_dir)/ledger.jsonl}"
+  if [ ! -s "$ledger" ]; then
+    echo "CCG_HISTORY_SKIPPED=no-ledger"
+    return 0
+  fi
+
+  # Extract unique paths from "diff --git a/<path> b/<path>" header lines.
+  local paths
+  paths=$(awk '
+    /^diff --git a\// {
+      sub(/^diff --git a\//, "")
+      sub(/ b\/.*$/, "")
+      if (!seen[$0]++) print
+    }
+  ' "$diff_file")
+
+  if [ -z "$paths" ]; then
+    echo "CCG_HISTORY_SKIPPED=no-paths-in-diff"
+    return 0
+  fi
+
+  # Collect ledger lines mentioning any path. Match against the JSON-quoted
+  # form "<path>" so "src/foo.ts" doesn't false-match "src/foobar.ts".
+  # grep -F = fixed string, so path regex chars need no escaping.
+  local match_tmp
+  match_tmp="$(dirname "$diff_file")/ledger_match.tmp"
+  : > "$match_tmp"
+  local p
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    grep -F "\"$p\"" "$ledger" 2>/dev/null >> "$match_tmp" || true
+  done <<EOF
+$paths
+EOF
+
+  # Dedup (preserve order — newest stays at bottom because ledger is append-only)
+  local match_dedup
+  match_dedup="$(dirname "$diff_file")/ledger_match.dedup"
+  awk '!seen[$0]++' "$match_tmp" > "$match_dedup"
+  rm -f "$match_tmp"
+
+  local match_count
+  match_count=$(wc -l < "$match_dedup" | tr -d ' ')
+
+  if [ "${match_count:-0}" = "0" ]; then
+    rm -f "$match_dedup"
+    echo "CCG_HISTORY_NONE=0_matches"
+    return 0
+  fi
+
+  local max_entries="${CCG_HISTORY_MAX:-3}"
+  local selected
+  selected="$(dirname "$diff_file")/ledger_match.selected"
+  tail -n "$max_entries" "$match_dedup" > "$selected"
+  rm -f "$match_dedup"
+
+  local out_file
+  out_file="$(dirname "$diff_file")/history.txt"
+
+  # NOTE: `local` declarations stay outside the while loop. zsh's `local var`
+  # (no `=`) prints the variable's current value — re-declaring inside a loop
+  # body would leak iteration N-1's values into the output file. Bash doesn't
+  # have this footgun, but ccg.sh is sourced by zsh users via Claude Code's
+  # Bash tool, so we write the portable form.
+  local line ts sha mode lines_field paths_list synth
+
+  {
+    printf '=== PRIOR REVIEWS (last %s entries touching these paths) ===\n\n' "$max_entries"
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      ts=$(printf '%s\n' "$line"          | sed -n 's/.*"ts":"\([^"]*\)".*/\1/p')
+      sha=$(printf '%s\n' "$line"         | sed -n 's/.*"sha":"\([^"]*\)".*/\1/p')
+      mode=$(printf '%s\n' "$line"        | sed -n 's/.*"mode":"\([^"]*\)".*/\1/p')
+      lines_field=$(printf '%s\n' "$line" | sed -n 's/.*"lines":"\([^"]*\)".*/\1/p')
+      paths_list=$(printf '%s\n' "$line"  | sed -n 's/.*"paths":\(\[[^]]*\]\).*/\1/p')
+      # Synthesis: the body between "synthesis":" and "} at end of line.
+      # Unescape JSON escapes back to readable text (\n→space, \"→", \\→\).
+      synth=$(printf '%s\n' "$line" | sed -n 's/.*"synthesis":"\(.*\)"}.*/\1/p' \
+              | sed 's/\\n/ /g; s/\\t/ /g; s/\\"/"/g; s/\\\\/\\/g')
+
+      printf -- '- [%s] sha=%s mode=%s lines=%s\n' \
+        "${ts:-?}" "${sha:-?}" "${mode:-?}" "${lines_field:-?}"
+      [ -n "$paths_list" ] && printf -- '  paths: %s\n' "$paths_list"
+      if [ -n "$synth" ]; then
+        printf -- '  synthesis: %s\n' "$synth"
+      fi
+      printf '\n'
+    done < "$selected"
+
+    printf '> Reviewer note: 这些是过去针对相同路径的评审。请检查是否有 recurring patterns,\n'
+    printf '> 或过去被标记 fix-required 的问题至今未解决。如果当前 diff 显然延续了之前的话题,\n'
+    printf '> 在 [FINDING] 的 detail 字段里引用之前的判断。\n'
+  } > "$out_file" 2>/dev/null || {
+    rm -f "$selected"
+    echo "CCG_HISTORY_FAIL=write-failed:$out_file"
+    return 1
+  }
+
+  rm -f "$selected"
+
+  echo "CCG_HISTORY_OK=${match_count}_matches_${max_entries}_max"
+  echo "CCG_HISTORY_FILE=${out_file}"
+}
+
+# ============================================================
 # Public: ccg_persist_report <workdir>
 #
 # Materializes a single self-contained Markdown report of the review under
@@ -1065,7 +1214,7 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then
   if [ "$#" -ge 1 ]; then
     cmd="$1"; shift
     case "$cmd" in
-      init|preflight|codex|gemini|cleanup|actual|usage|diff_capture|risk_score|ledger_record|ledger_query|persist_report)
+      init|preflight|codex|gemini|cleanup|actual|usage|diff_capture|risk_score|ledger_record|ledger_query|ledger_context|persist_report)
         "ccg_$cmd" "$@"
         ;;
       *)

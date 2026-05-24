@@ -997,6 +997,131 @@ fi
 rm -rf "$repo"
 
 
+# === 15. ccg_ledger_context (write-only → bidirectional ledger) ================
+# Verifies that prior reviews touching the same paths are surfaced into a
+# history.txt that the protocol layer (ccg.md step 2.5) embeds into prompts.
+# Without these tests, the L6 consumer path is silently broken under zsh,
+# where `local var` inside a loop body leaks iteration N-1 values to stdout.
+
+# Helper: build a workdir with diff.txt + a controlled ledger.
+_setup_history_fixture() {
+  local wd ledger
+  wd=$(mktemp -d -t ccg.test.XXXXXXXX)
+  cat > "$wd/diff.txt" <<EOF
+diff --git a/auth/login.go b/auth/login.go
+index 1234..5678 100644
+--- a/auth/login.go
++++ b/auth/login.go
+@@ -1,3 +1,4 @@
+-old line
++new line
+EOF
+  ledger="$wd/ledger.jsonl"
+  cat > "$ledger" <<EOF
+{"ts":"2026-05-10T10:00:00Z","repo":"/r","branch":"x","sha":"abc1234","mode":"quality","risk":72,"files":1,"lines":"+5-0","paths":["auth/login.go"],"synthesis":"DIVERGENCE on constant-time compare."}
+{"ts":"2026-05-15T11:00:00Z","repo":"/r","branch":"y","sha":"def5678","mode":"balanced","risk":40,"files":2,"lines":"+10-2","paths":["util/x.go"],"synthesis":"unrelated path."}
+{"ts":"2026-05-20T12:00:00Z","repo":"/r","branch":"z","sha":"ghi9abc","mode":"quality","risk":80,"files":1,"lines":"+8-1","paths":["auth/login.go","auth/session.go"],"synthesis":"BLINDSPOT: error logging missing. fix-required."}
+EOF
+  echo "$wd"
+}
+
+t_start "15.1 ledger_context skipped when CCG_NO_HISTORY=1"
+fresh_source
+wd=$(_setup_history_fixture)
+r=$(CCG_NO_HISTORY=1 CCG_LEDGER_LOG="$wd/ledger.jsonl" ccg_ledger_context "$wd/diff.txt" 2>&1)
+rm -rf "$wd"
+assert_match "$r" "CCG_HISTORY_SKIPPED=disabled"
+
+t_start "15.2 ledger_context skipped when ledger missing"
+fresh_source
+wd=$(_setup_history_fixture)
+r=$(CCG_LEDGER_LOG="$wd/no-such-ledger.jsonl" ccg_ledger_context "$wd/diff.txt" 2>&1)
+rm -rf "$wd"
+assert_match "$r" "CCG_HISTORY_SKIPPED=no-ledger"
+
+t_start "15.3 ledger_context skipped when diff missing"
+fresh_source
+wd=$(_setup_history_fixture)
+r=$(CCG_LEDGER_LOG="$wd/ledger.jsonl" ccg_ledger_context "$wd/no-such-diff.txt" 2>&1)
+rm -rf "$wd"
+assert_match "$r" "CCG_HISTORY_SKIPPED=no-diff"
+
+t_start "15.4 ledger_context skipped when diff has no path headers"
+fresh_source
+wd=$(_setup_history_fixture)
+echo "no diff headers, just text" > "$wd/diff.txt"
+r=$(CCG_LEDGER_LOG="$wd/ledger.jsonl" ccg_ledger_context "$wd/diff.txt" 2>&1)
+rm -rf "$wd"
+assert_match "$r" "CCG_HISTORY_SKIPPED=no-paths-in-diff"
+
+t_start "15.5 ledger_context returns NONE when no path overlap"
+fresh_source
+wd=$(_setup_history_fixture)
+cat > "$wd/diff.txt" <<EOF
+diff --git a/completely/different.txt b/completely/different.txt
++x
+EOF
+r=$(CCG_LEDGER_LOG="$wd/ledger.jsonl" ccg_ledger_context "$wd/diff.txt" 2>&1)
+rm -rf "$wd"
+assert_match "$r" "CCG_HISTORY_NONE=0_matches"
+
+t_start "15.6 ledger_context writes history.txt on match"
+fresh_source
+wd=$(_setup_history_fixture)
+r=$(CCG_LEDGER_LOG="$wd/ledger.jsonl" ccg_ledger_context "$wd/diff.txt" 2>&1)
+hist_file="$wd/history.txt"
+if [ -f "$hist_file" ] && grep -q "PRIOR REVIEWS" "$hist_file"; then t_pass
+else t_fail "r=$r hist_exists=$([ -f "$hist_file" ] && echo yes || echo no)"; fi
+rm -rf "$wd"
+
+t_start "15.7 ledger_context history.txt contains ts/sha/mode for matched entries"
+fresh_source
+wd=$(_setup_history_fixture)
+CCG_LEDGER_LOG="$wd/ledger.jsonl" ccg_ledger_context "$wd/diff.txt" >/dev/null 2>&1
+content=$(cat "$wd/history.txt")
+rm -rf "$wd"
+# Must contain BOTH matching ledger entries (abc1234 and ghi9abc) but NOT the unrelated one
+ok=1
+echo "$content" | grep -q "abc1234" || ok=0
+echo "$content" | grep -q "ghi9abc" || ok=0
+echo "$content" | grep -q "def5678" && ok=0
+assert_eq "$ok" "1"
+
+t_start "15.8 ledger_context honors CCG_HISTORY_MAX=1"
+fresh_source
+wd=$(_setup_history_fixture)
+CCG_HISTORY_MAX=1 CCG_LEDGER_LOG="$wd/ledger.jsonl" ccg_ledger_context "$wd/diff.txt" >/dev/null 2>&1
+content=$(cat "$wd/history.txt")
+rm -rf "$wd"
+# Only the newest matching entry (ghi9abc) should be present.
+echo "$content" | grep -q "ghi9abc" && ! echo "$content" | grep -q "abc1234" \
+  && t_pass || t_fail "content=$content"
+
+t_start "15.9 ledger_context history.txt contains NO bash/zsh debug-leak lines"
+# Regression guard: zsh's `local var` (no =) inside a loop body prints iteration N-1
+# values. This test would FAIL if a future contributor refactors local declarations
+# back inside the loop. We assert that lines like 'ts=...' or 'sha=...' (raw KV
+# without the proper '- [..] sha=...' framing) do not appear at line start.
+fresh_source
+wd=$(_setup_history_fixture)
+CCG_LEDGER_LOG="$wd/ledger.jsonl" ccg_ledger_context "$wd/diff.txt" >/dev/null 2>&1
+hist=$(cat "$wd/history.txt")
+rm -rf "$wd"
+# Each rendered entry starts with "- [TIMESTAMP]". A leaked debug line would
+# start with a bare "ts=" or "synth='".  Reject either pattern at column 1.
+if printf '%s\n' "$hist" | grep -qE '^(ts|sha|mode|lines_field|paths_list|synth)=' ; then
+  t_fail "found bare KEY= line in history.txt (zsh local-leak regression)"
+else
+  t_pass
+fi
+
+t_start "15.10 ledger_context dispatch subcommand works"
+wd=$(_setup_history_fixture)
+out=$(CCG_LEDGER_LOG="$wd/ledger.jsonl" bash "$HELPER" ledger_context "$wd/diff.txt" 2>&1)
+rm -rf "$wd"
+assert_match "$out" "CCG_HISTORY_(OK|NONE|SKIPPED)"
+
+
 # === 11. Real CLI smoke test (opt-in) ==========================================
 if [ "${REAL_CLI:-0}" = "1" ]; then
   t_start "11.1 real Codex E2E (fast prompt)"

@@ -2,7 +2,7 @@
 
 > 対象読者: コントリビューターおよびインテグレーター。`ccg` を使うだけなら [README.ja.md](../README.ja.md) を読んでください。`ccg` を**変更したい**なら本書を読んでください。
 >
-> 真実の出典: 本書は `ccg.sh` と `bin/ccg.js` のコードが**実際に行うこと**を記述します — マーケティングコピーが主張することではありません。食い違いがあれば `grep -n '^ccg_\|^_ccg_' ccg.sh` で関数名を照合してください。
+> 本書は `ccg.sh` と `bin/ccg.js` のコードが実際に行うことを記述します。食い違いがあれば `grep -n '^ccg_\|^_ccg_' ccg.sh` で関数名を照合してください。
 >
 > 翻訳同期について: 本翻訳は英語版 [docs/ARCHITECTURE.md](ARCHITECTURE.md) を追随します; 遅れがあれば英語版を優先してください。
 
@@ -10,11 +10,11 @@
 
 ---
 
-## 1. 正直な一行ポジショニング
+## 1. ccg とは
 
 ccg は **Claude Code 内から Codex + Gemini CLI を呼び出すための production-grade なオーケストレーター** です。
 
-これがエンジニアリングの真実です。「Code Divergence Detector」は 6 つの下層に乗った [L7 のプロダクトフック](#l7--分岐合成claude-側) に過ぎません — 各下層は、slash command から LLM CLI に shell-out する際に直面する独立した実問題を解決しています。
+「Code Divergence Detector」は 6 つの下層に乗った [L7 のプロダクトフック](#l7--分岐合成claude-側) に過ぎません — 各下層は、slash command から LLM CLI に shell-out する際に直面する独立した実問題を解決しています。
 
 > L7 を消しても ccg は依然有用（キャッシュ、台帳、使用量、リスクルーティング）。
 > L1 を消すと ccg は安全でなくなる。
@@ -213,7 +213,7 @@ CCG_RISK_REASONS=auth+40 sql_interp+30 size>300+15 docs_only-40
 ### L7 — 分岐合成（Claude 側）
 **問題:** 単一モデルのコードレビュー（Copilot、Cursor `/review`、Aider）は自分の盲点を見られない。賢いモデルでも 1 つの視点しか得られない。
 
-**解法:** 真実の出典は `ccg.md` 内の slash-command プロトコル、ライブラリ関数ではない。Claude は:
+**解法:** L7 のロジックは `ccg.md`（Claude が従う slash-command プロトコル）にあり、`ccg.sh` にはない。Claude は:
 
 1. `ccg.sh` を source、`ccg_init` を呼んで workdir 確保。
 2. `ccg_preflight` で Codex + Gemini 利用可能性チェック。

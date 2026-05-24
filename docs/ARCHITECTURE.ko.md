@@ -2,7 +2,7 @@
 
 > 대상 독자: 기여자 및 통합자. `ccg`를 그냥 사용하고 싶다면 [README.ko.md](../README.ko.md)를 읽으세요. `ccg`를 **변경**하고 싶다면 본 문서를 읽으세요.
 >
-> 진실의 출처: 본 문서는 `ccg.sh` 및 `bin/ccg.js`의 코드가 **실제로 하는 것**을 기술합니다 — 마케팅 카피의 주장이 아닙니다. 불일치가 있으면 `grep -n '^ccg_\|^_ccg_' ccg.sh`로 함수명을 대조하세요.
+> 본 문서는 `ccg.sh` 및 `bin/ccg.js`의 코드가 실제로 하는 것을 기술합니다. 불일치가 있으면 `grep -n '^ccg_\|^_ccg_' ccg.sh`로 함수명을 대조하세요.
 >
 > 번역 동기화 안내: 본 번역은 영어 원문 [docs/ARCHITECTURE.md](ARCHITECTURE.md)를 따라갑니다; 지연이 있으면 영문판이 우선입니다.
 
@@ -10,11 +10,11 @@
 
 ---
 
-## 1. 솔직한 한 줄 포지셔닝
+## 1. ccg란
 
 ccg는 **Claude Code 내부에서 Codex + Gemini CLI를 호출하기 위한 production-grade 오케스트레이터** 입니다.
 
-이것이 엔지니어링의 진실입니다. "Code Divergence Detector"는 여섯 개의 하위 계층 위에 얹힌 [L7 제품 훅](#l7--분기-합성claude-측)일 뿐입니다 — 각 하위 계층은 slash command에서 LLM CLI로 shell-out할 때 부딪히는 독립적인 실제 엔지니어링 문제를 해결합니다.
+"Code Divergence Detector"는 여섯 개의 하위 계층 위에 얹힌 [L7 제품 훅](#l7--분기-합성claude-측)일 뿐입니다 — 각 하위 계층은 slash command에서 LLM CLI로 shell-out할 때 부딪히는 독립적인 실제 엔지니어링 문제를 해결합니다.
 
 > L7을 제거해도 ccg는 여전히 유용합니다 (캐시, 원장, 사용량, 위험 라우팅).
 > L1을 제거하면 ccg는 안전하지 않습니다.
@@ -213,7 +213,7 @@ CCG_RISK_REASONS=auth+40 sql_interp+30 size>300+15 docs_only-40
 ### L7 — 분기 합성 (Claude 측)
 **문제:** 단일 모델 코드 리뷰(Copilot, Cursor `/review`, Aider)는 자신의 사각지대를 볼 수 없음. 똑똑한 모델이라도 한 관점만.
 
-**해법:** 진실의 출처는 `ccg.md`의 slash-command 프로토콜, 라이브러리 함수가 아님. Claude는:
+**해법:** L7 로직은 `ccg.md`(Claude가 따르는 slash-command 프로토콜)에 있으며, `ccg.sh`에는 없음. Claude는:
 
 1. `ccg.sh`를 source, `ccg_init` 호출하여 workdir 할당.
 2. `ccg_preflight` 호출하여 Codex + Gemini 가용성 확인.

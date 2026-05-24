@@ -2,7 +2,7 @@
 
 > 受众：贡献者和集成者。如果你只是想用 `ccg`，读 [README.zh-CN.md](../README.zh-CN.md)。如果你想 **改 ccg**，读这份文档。
 >
-> 真相来源：本文描述 `ccg.sh` 和 `bin/ccg.js` 里**代码真实做的事**——不是营销话术声称的。如果有出入，用 `grep -n '^ccg_\|^_ccg_' ccg.sh` 对照函数名。
+> 本文档描述 `ccg.sh` 和 `bin/ccg.js` 的实际行为。如有出入，用 `grep -n '^ccg_\|^_ccg_' ccg.sh` 对照函数名为准。
 >
 > 翻译同步说明：本翻译跟随英文版 [docs/ARCHITECTURE.md](ARCHITECTURE.md)；如有滞后请以英文版为准。
 
@@ -10,11 +10,11 @@
 
 ---
 
-## 1. 诚实的一句话定位
+## 1. ccg 是什么
 
 ccg 是 **在 Claude Code 里调用 Codex + Gemini CLI 的生产级编排层**。
 
-这是工程真相。"代码分歧检测器"是叠在六个底层之上的 [L7 产品钩子](#l7--分歧综合claude-端)——这六层每一层都独立解决一个真实工程问题，否则你从 slash command 里 shell-out 到 LLM CLI 会立刻撞上。
+"代码分歧检测器"是叠在六个底层之上的 [L7 产品钩子](#l7--分歧综合claude-端)——这六层每一层都独立解决一个真实工程问题，否则你从 slash command 里 shell-out 到 LLM CLI 会立刻撞上。
 
 > 删了 L7，ccg 仍然有用（缓存、账本、用量、风险路由）。
 > 删了 L1，ccg 不安全。
@@ -213,7 +213,7 @@ CCG_RISK_REASONS=auth+40 sql_interp+30 size>300+15 docs_only-40
 ### L7 — 分歧综合（Claude 端）
 **问题：** 单模型 code review（Copilot、Cursor `/review`、Aider）看不到自己的盲区。哪怕模型再聪明，也只有一种视角。
 
-**解法：** 真相来源是 `ccg.md` 里的 slash-command 协议，**不是某个库函数**。Claude：
+**解法：** L7 的逻辑在 `ccg.md`（Claude 遵循的 slash-command 协议）里，不在 `ccg.sh` 里。Claude：
 
 1. source `ccg.sh`，调用 `ccg_init` 分配 workdir。
 2. 调用 `ccg_preflight` 检查 Codex + Gemini 可用性。

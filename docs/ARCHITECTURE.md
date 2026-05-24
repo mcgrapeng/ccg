@@ -2,17 +2,17 @@
 
 > Audience: contributors and integrators. If you just want to use `ccg`, read [README.md](../README.md). If you want to **change ccg**, read this.
 >
-> Source of truth: this document describes what the code in `ccg.sh` and `bin/ccg.js` actually does — not what marketing copy claims. Cross-reference function names with `grep -n '^ccg_\|^_ccg_' ccg.sh` if anything looks off.
+> This doc describes what `ccg.sh` and `bin/ccg.js` actually do. Cross-reference function names with `grep -n '^ccg_\|^_ccg_' ccg.sh` if anything looks off.
 
 **English** ｜ [简体中文](ARCHITECTURE.zh-CN.md) ｜ [日本語](ARCHITECTURE.ja.md) ｜ [한국어](ARCHITECTURE.ko.md)
 
 ---
 
-## 1. The honest one-liner
+## 1. What ccg is
 
 ccg is a **production-grade orchestrator for calling Codex + Gemini CLI from inside Claude Code**.
 
-That's the engineering truth. "Code divergence detector" is the [L7 product hook](#l7--divergence-synthesis-claude-side) layered on top of six lower layers — each of which independently solves a real engineering problem you'd otherwise hit when shelling out to LLM CLIs from a slash command.
+"Code divergence detector" is the [L7 product hook](#l7--divergence-synthesis-claude-side) layered on top of six lower layers — each of which independently solves a real engineering problem you'd otherwise hit when shelling out to LLM CLIs from a slash command.
 
 > If you delete L7, ccg is still useful (cache, ledger, usage, risk routing).
 > If you delete L1, ccg is unsafe.
@@ -229,7 +229,7 @@ Knobs:
 ### L7 — Divergence synthesis (Claude-side)
 **Problem:** Single-model code review (Copilot, Cursor `/review`, Aider) cannot see its own blind spots. Even with a smart model, you get one perspective.
 
-**Solution:** The slash-command protocol in `ccg.md` is the source of truth here, not a library function. Claude:
+**Solution:** The L7 logic lives in `ccg.md` (the slash-command protocol Claude follows), not in `ccg.sh`. Claude:
 
 1. Sources `ccg.sh`, calls `ccg_init` to allocate a workdir.
 2. Calls `ccg_preflight` to check Codex + Gemini availability.

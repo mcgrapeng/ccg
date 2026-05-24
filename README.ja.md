@@ -1,5 +1,7 @@
 # ccg — Code Divergence Detector
 
+> Codex と Gemini があなたのコード上で意見を異にした箇所を浮かび上がらせる——そこが、あなたが判断を下す必要がある場所。
+> 
 > Claude Code のスラッシュコマンド。一度インストールして、diff の上で `/ccg` と入力するだけ。
 
 [![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)]()
@@ -27,6 +29,14 @@ ccg は Claude Code 用の `/ccg` スラッシュコマンドで、この 3 つ�
 3. コストを記録、リスクに応じて最安充足モデルを自動選択、過去のレビュー履歴を保持
 
 **例え話**：別チームの 2 人のシニアエンジニアに同じ PR をレビューさせ、テックリードに統合させる：「ここは両方同意、ここは意見が分かれた——あなたが決めて、私の見解は以下」。
+
+## ccg の能力セット（5 つのコア機能）
+
+1. **並行レビュー** — 同じ prompt を Codex と Gemini に同時送信
+2. **分岐検出** — Claude は両者が意見を異にした箇所を浮かび上がらせる（同意した箇所ではなく）
+3. **リスク認識ルーティング** — 自動的に diff をスコアリングし、cost / balanced / quality モードを選択
+4. **コスト追跡** — すべての呼び出しを記録；24h キャッシュで繰り返しレビューは無料（$0.00）
+5. **レビュー記憶** — 過去のレビューを保存；次回レビューは自動的に履歴を注入するため、再発パターンが浮かび上がり、セッション間で消えない
 
 ## いつ ccg を使うか
 
@@ -59,10 +69,10 @@ ccg は Claude Code 用の `/ccg` スラッシュコマンドで、この 3 つ�
 Codex が「`subtle.ConstantTimeCompare` を使え」と言い、Gemini が「bcrypt は既に恒定時間、それは cargo-cult」と言った時、**そここそ考える必要がある場所**。他のツールはこれを「timing attack に注意」とぼやかして混ぜます。ccg は両者の生の言葉を見せます。
 
 **2. コスト可視化が組み込み。**
-Codex / Gemini CLI は支出を教えません。ccg は全呼び出しを記録、リスクに応じて最安充足モデルを自動選択（リスクルーティング）、同一プロンプトは 24h キャッシュでゼロコスト。`ccg_usage --this-month` が「今月いくら使った？」に即答。
+Codex / Gemini CLI は支出を教えません。ccg は全呼び出しを記録、リスクに応じて最安充足モデルを自動選択（リスクルーティング）、同一プロンプトは 24h キャッシュでゼロコスト。典型的な支出：意味のある分岐検出ごとに $0.02-0.15——シニアエンジニアのコードレビューは $200-300 の時間コストがかかります。分岐検出は最初の contentious PR で元が取れます。`ccg_usage --this-month` でいつでも累計を確認できます。
 
-**3. セッションを跨いで残るレビュー履歴。**
-「2 週間前、モデルは `src/auth.ts` について何と言ったか？」——ccg の追記専用台帳がこれに答えます。ステートレスなツールには不可能です。
+**3. セッションを跨いで残るレビュー履歴——*しかも次のレビューに供給される*。**
+「2 週間前、モデルは `src/auth.ts` について何と言ったか？」——ccg の追記専用台帳がこれに答えます。ステートレスなツールには不可能です。v3.2 から、同じファイルに触れた過去のレビューが次のプロンプトに自動注入されるため、再発パターンが浮かび上がり、セッション間で消えなくなります。未解決の `fix-required` も失われません。
 
 ## インストール
 
@@ -89,6 +99,36 @@ echo 'export GEMINI_API_KEY="<your-key>"' >> ~/.zshenv
 npx @mcgrapeng/ccg doctor      # Codex / Gemini / API key をチェック
 npx @mcgrapeng/ccg about       # 7 層の機能と現在の環境状態を表示
 ```
+
+## 分岐検出の例（ccg が捕捉する一般的パターン）
+
+分岐は全領域で発生し、セキュリティだけではありません。異なるドメインでの分岐の様子を見てください：
+
+**暗号/セキュリティ（古典的）**
+```
+▸ auth/login.go:6 — bcrypt ハッシュの比較方法
+  🔵 Codex： 「subtle.ConstantTimeCompare でラップせよ、timing 攻撃防ぐため」
+  🟢 Gemini：「bcrypt は既に恒定時間。ラッピングは cargo-cult」
+  ⚖️ 決定者：脅威モデルに基づいてあなたが選択
+```
+
+**フロントエンド（キャッシュ戦略）**
+```
+▸ cache.ts:42 — 書き込み時に無効化、またはイベント駆動無効化？
+  🔵 Codex： 「写入时总是重验（予測可能、よりシンプル）」
+  🟢 Gemini：「イベント購読の方が拡張性良い；書き込み時無効化はキャッシュストーム原因」
+  ⚖️ 決定者：トラフィックパターンと SLA に基づいてあなたが選択
+```
+
+**API 設計（ページング）**
+```
+▸ pagination.go:18 — cursor vs offset ページング？
+  🔵 Codex： 「offset はシンプル、ユーザーは慣れている」
+  🟢 Gemini：「cursor は O(1)、offset は削除時 O(n)；成長率で選べ」
+  ⚖️ 決定者：データ変動频度と成長予測に基づいてあなたが選択
+```
+
+この分岐が ccg が元を取る箇所です。下に完全な深掘り例があります。
 
 ## 使い方の完全な例
 
@@ -154,7 +194,7 @@ Claude Code を開いて入力：
 | **AGREEMENT** | Codex と Gemini の両方が同じ問題を指摘。単一の Claude でも見つかる可能性が高い——**新規情報量低**。 | 流し読み、未修正なら修正。 |
 | **DIVERGENCE** ★ | 両モデルが意見不一致。**これが ccg の存在意義**。Claude の「アクション」行が推奨をくれるが、最終判断はあなた。 | 注意深く読む、Claude の判断を受け入れるかオーバーライド。 |
 | **BLINDSPOT** | どちらのモデルも気付かなかったが Claude が合成時に疑った。**控えめに**——1 回あたり最大 2 件。 | ヒントとして扱う、聖典ではない。 |
-| **VERDICT** | `merge` / `fix-required` / `discuss`。1 行サマリー。 | マージゲートとして使用。 |
+| **VERDICT** | `merge` / `fix-required` / `discuss`。1 行サマリー。 | **マージゲートとして使用。** |
 
 レビュー後、`ccg_ledger_record` が JSONL 1 行を台帳に書きます。2 週間後：
 
@@ -183,6 +223,8 @@ CCG_NO_CACHE=1 /ccg            # この呼び出しのみ 24h キャッシュを
 | `CCG_MODE` | `auto` | `auto` / `cost` / `balanced` / `quality` |
 | `CCG_CACHE_TTL_HOURS` | `24` | キャッシュ TTL |
 | `CCG_MAX_PROMPT_KB` | `100` | 1 回あたりのプロンプトサイズ上限 |
+| `CCG_NO_HISTORY` | `0` | `1` に設定してレビュー履歴注入を無効化 |
+| `CCG_HISTORY_MAX` | `3` | 注入する過去レビューの最大数 |
 
 コスト目安（USD / 呼び出し、キャッシュヒット後）：
 
@@ -196,15 +238,19 @@ CCG_NO_CACHE=1 /ccg            # この呼び出しのみ 24h キャッシュを
 
 ```bash
 source ~/.claude/commands/ccg.sh
-ccg_usage --this-month
+ccg_usage --this-month     # 今月を provider 別に
+ccg_usage --all            # 累計
 ```
 
-## 適さない用途
+## 適さない用途（スコープの境界）
 
-- Claude Code 以外の IDE（[zen-mcp-server](https://github.com/BeehiveInnovations/zen-mcp-server) を試してください）
-- 静的解析の置き換え（Semgrep / CodeQL と併用してください）
-- 全 PR で自動実行（ccg はトリアージツール、ボットではありません）
-- ストリーミング出力やマルチターン会話
+ccg は高度な判断が必要なコードレビュー用に設計されています。以下の*代替品ではありません*：
+
+- **静的解析** — Semgrep / CodeQL と並行使用；代替ではない
+- **Lint またはフォーマッタ** — スタイルチェック用；ccg はアーキテクチャを見る
+- **自動ゲーティング** — ccg はトリアージツール、ボットではない（すべての PR で自動実行しないこと）
+- **ストリーミング対話** — ccg は one-shot；マルチターン会話は Codex / Gemini CLI で直接使用
+- **Claude Code 以外の IDE** — [zen-mcp-server](https://github.com/BeehiveInnovations/zen-mcp-server) を VS Code / JetBrains で試してください
 
 ## アーキテクチャとコントリビュート
 

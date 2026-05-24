@@ -1,5 +1,7 @@
 # ccg — 代码分歧检测器
 
+> 浮现 Codex 和 Gemini 在你 diff 上意见不一致的地方——那才是你需要拍板的地方。
+> 
 > Claude Code 的 slash command。装一次，在 diff 上输入 `/ccg`。
 
 [![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)]()
@@ -27,6 +29,14 @@ ccg 是 Claude Code 的 `/ccg` slash command，针对这三件事都做了真正
 3. 自动按代码风险选最便宜够用的模型、记录每次调用成本、保留历史评审账本
 
 **类比理解**：就像让两个不同团队的 senior 工程师 review 同一份 PR，再让一个 tech lead 综合："这几点他们都同意，这一点他们意见不一致——你来定，下面是我的看法。"
+
+## ccg 的能力集（5 个核心功能）
+
+1. **平行评审** — 同一个 prompt 同时发给 Codex 和 Gemini
+2. **分歧检测** — Claude 浮现它们意见不一致的地方（不是一致的地方）
+3. **风险感知路由** — 自动给 diff 评分，选 cost / balanced / quality 模式
+4. **成本追踪** — 记录每次调用；24h 缓存让重复评审成本为零（$0.00）
+5. **评审记忆** — 保存过去的评审；下一次评审自动注入历史，这样重复问题会浮现，不会在会话间蒸发
 
 ## 什么时候用 ccg
 
@@ -59,10 +69,10 @@ ccg 是 Claude Code 的 `/ccg` slash command，针对这三件事都做了真正
 当 Codex 说"加上 `subtle.ConstantTimeCompare` 防 timing attack"，而 Gemini 说"bcrypt 自己就是恒定时间的，加包装是 cargo-cult"——**这才是你需要思考的地方**。别的工具会把这种冲突糊成一句模糊的"注意 timing 攻击"。ccg 把两边原话端给你。
 
 **2. 内置成本可见性。**
-Codex / Gemini CLI 都不告诉你花了多少钱。ccg 记录每次调用，按风险自动选最便宜够用的模型（risk-aware routing），相同 prompt 24h 内命中缓存零成本。`ccg_usage --this-month` 立刻回答"这个月我花了多少？"。
+Codex / Gemini CLI 都不告诉你花了多少钱。ccg 记录每次调用，按风险自动选最便宜够用的模型（risk-aware routing），相同 prompt 24h 内命中缓存零成本。典型花费：每次有意义的分歧检测 $0.02-0.15——一次资深工程师 code review 要花 $200-300 的时间成本。分歧检测在第一个有争议的 PR 就赚回成本。随时用 `ccg_usage --this-month` 查看累计。
 
-**3. 跨会话保留的评审历史。**
-"两周前模型对 `src/auth.ts` 说了什么？"——ccg 的 append-only 账本能回答。任何无状态工具都做不到。
+**3. 跨会话保留的评审历史——*并喂给下一次评审*。**
+"两周前模型对 `src/auth.ts` 说了什么？"——ccg 的 append-only 账本能回答。任何无状态工具都做不到。v3.2 起，过去触及同一文件的评审会自动注入下次 prompt。重复出现的问题会浮现出来，不再随 session 关闭蒸发。未解决的 `fix-required` 项也不会丢失。
 
 ## 怎么安装
 
@@ -89,6 +99,36 @@ echo 'export GEMINI_API_KEY="<你的-key>"' >> ~/.zshenv
 npx @mcgrapeng/ccg doctor      # 检查 Codex / Gemini / API key
 npx @mcgrapeng/ccg about       # 看 7 层能力 + 当前环境状态
 ```
+
+## 分歧示例（ccg 抓住的常见模式）
+
+分歧发生在各个领域，不只是安全。看看不同领域的分歧是什么样子的：
+
+**加密/安全（经典）**
+```
+▸ auth/login.go:6 — bcrypt 哈希比较
+  🔵 Codex：     "外包一层 subtle.ConstantTimeCompare 防 timing 攻击"
+  🟢 Gemini：    "bcrypt 自身是恒定时间。外包是 cargo-cult"
+  ⚖️ 决策方：你根据威胁模型来选择
+```
+
+**前端（缓存策略）**
+```
+▸ cache.ts:42 — 写时失效还是事件驱动失效？
+  🔵 Codex：     "写时总是重验（可预测，更简单）"
+  🟢 Gemini：    "事件订阅扩展更好；写时重验会导致缓存风暴"
+  ⚖️ 决策方：你根据流量模式和 SLA 选择
+```
+
+**API 设计（分页）**
+```
+▸ pagination.go:18 — cursor 还是 offset 分页？
+  🔵 Codex：     "offset 更简单，用户熟悉"
+  🟢 Gemini：    "cursor O(1)，offset 删除时 O(n)；根据增长率选"
+  ⚖️ 决策方：你根据数据变动频率和增长预测选择
+```
+
+这种分歧就是 ccg 赚回成本的地方。下面是完整的深度示例。
 
 ## 完整使用示例
 
@@ -153,7 +193,7 @@ func Login(user, pw string) bool {                   func Login(user, pw string)
 | **AGREEMENT** | Codex 和 Gemini 都标记的同一个问题。你单源用 Claude 也大概率能发现——**新信息量低**。 | 扫一眼，没改的就改。 |
 | **DIVERGENCE** ★ | 两个模型意见不一致。**这才是 ccg 存在的真正原因。** Claude 的"建议动作"给你推荐，但你是最终拍板的人。 | 仔细读，接受 Claude 判断或自己覆盖。 |
 | **BLINDSPOT** | 两个模型都没看到，但 Claude 综合时怀疑。**慎用**——每次最多 2 条。 | 当提示看，不是金科玉律。 |
-| **VERDICT** | `merge` / `fix-required` / `discuss`。一句话结论。 | 当 merge 门禁用。 |
+| **VERDICT** | `merge` / `fix-required` / `discuss`。一句话结论。 | **当 merge 门禁用。** |
 
 评审完，`ccg_ledger_record` 会写一行 JSONL 到账本。两周后你可以：
 
@@ -182,6 +222,8 @@ CCG_NO_CACHE=1 /ccg            # 本次跳过 24h 缓存
 | `CCG_MODE` | `auto` | `auto` / `cost` / `balanced` / `quality` |
 | `CCG_CACHE_TTL_HOURS` | `24` | 缓存 TTL |
 | `CCG_MAX_PROMPT_KB` | `100` | 单次 prompt 大小硬上限 |
+| `CCG_NO_HISTORY` | `0` | 设为 `1` 禁用评审历史注入 |
+| `CCG_HISTORY_MAX` | `3` | 注入历史的最大条数 |
 
 成本参考（USD / 次，缓存命中 $0）：
 
@@ -191,19 +233,23 @@ CCG_NO_CACHE=1 /ccg            # 本次跳过 24h 缓存
 | `balanced` | gpt-5-mini  | gemini-2.5-flash      | ~$0.0046 |
 | `quality`  | gpt-5       | gemini-2.5-pro        | ~$0.0440 |
 
-随时查累计：
+追踪支出：
 
 ```bash
 source ~/.claude/commands/ccg.sh
-ccg_usage --this-month
+ccg_usage --this-month     # 本月按 provider 分类
+ccg_usage --all            # 累计
 ```
 
-## 不适合的场景
+## 不适合的场景（范围边界）
 
-- Claude Code 之外的 IDE（试试 [zen-mcp-server](https://github.com/BeehiveInnovations/zen-mcp-server)）
-- 替代静态分析（要配合 Semgrep / CodeQL 用）
-- 每个 PR 自动跑（ccg 是分诊工具，不是机器人）
-- 流式输出或多轮对话
+ccg 是为高判断力 code review 专门设计的。*不是*以下的替代品：
+
+- **静态分析** — 配合 Semgrep / CodeQL 用，不要替代
+- **Linter 或代码格式化工具** — 那些抓风格；ccg 抓架构
+- **自动化门禁** — ccg 是分诊工具，不是机器人（不要在每个 PR 上自动跑）
+- **流式对话** — ccg 是一次性的；多轮对话用 Codex / Gemini CLI 直接用
+- **非 Claude Code 的 IDE** — 试试 [zen-mcp-server](https://github.com/BeehiveInnovations/zen-mcp-server) 用于 VS Code / JetBrains
 
 ## 架构与贡献
 

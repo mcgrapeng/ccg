@@ -1,5 +1,7 @@
 # ccg — Code Divergence Detector
 
+> Surface where Codex and Gemini disagree on your code — that's where you need to make a call.
+> 
 > A Claude Code slash command. Install once, type `/ccg` on a diff.
 
 [![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)]()
@@ -27,6 +29,14 @@ ccg is a `/ccg` slash command for Claude Code that fixes all three. On any diff,
 3. Tracks cost, picks the cheapest model good enough for the risk level, and remembers past reviews
 
 **Think of it like:** asking two senior engineers from different teams to review the same PR, then having a tech lead synthesize: "they agree on these issues, they disagree on this one — you decide, and here's my read."
+
+## What ccg does (5 core capabilities)
+
+1. **Parallel reviews** — same prompt to Codex + Gemini simultaneously
+2. **Divergence detection** — Claude surfaces where they disagree (not where they agree)
+3. **Risk-aware routing** — auto-scores your diff, picks cost / balanced / quality mode
+4. **Cost tracking** — logs every call; 24h cache makes repeat reviews free ($0.00)
+5. **Review memory** — saves past reviews; next review auto-injects history so recurring patterns surface instead of decaying between sessions
 
 ## When to use ccg
 
@@ -59,10 +69,10 @@ The trigger isn't a *domain* — it's a *feeling*. Use ccg when, looking at your
 When Codex says "use `subtle.ConstantTimeCompare`" and Gemini says "bcrypt is already constant-time, that's cargo-cult", *that* is where you need to think. Other tools blend these into a vague "consider timing attacks". ccg shows you the conflict verbatim.
 
 **2. Cost telemetry built in.**
-Codex/Gemini CLIs don't tell you what you spent. ccg logs every call, picks the cheapest sufficient model automatically (risk-aware routing), and caches identical prompts for 24h. `ccg_usage --this-month` answers "how much have I spent so far?".
+Codex/Gemini CLIs don't tell you what you spent. ccg logs every call, picks the cheapest sufficient model automatically (risk-aware routing), and caches identical prompts for 24h at zero cost. Typical spend: $0.02–0.15 per meaningful divergence review — a single senior code review costs $200–300 in time. Divergence detection earns its cost on the first contentious PR. Check accumulated spend anytime with `ccg_usage --this-month`.
 
-**3. A review history that survives across sessions.**
-"What did the model say about `src/auth.ts` two weeks ago?" — ccg's append-only ledger answers that. No stateless tool can.
+**3. A review history that survives across sessions — *and feeds the next review*.**
+"What did the model say about `src/auth.ts` two weeks ago?" — ccg's append-only ledger answers that. No stateless tool can. As of v3.2, prior reviews touching the same files are auto-injected into the next prompt. Recurring patterns surface instead of decaying. Unresolved `fix-required` items don't get lost between sessions.
 
 ## Install
 
@@ -90,7 +100,37 @@ npx @mcgrapeng/ccg doctor      # check Codex / Gemini / API key
 npx @mcgrapeng/ccg about       # 7-layer capability probe + runtime state
 ```
 
-## Try it — a walkthrough
+## Example divergences (the patterns ccg catches)
+
+Disagreement happens everywhere, not just security. Here's what divergence looks like in different domains:
+
+**Crypto/Security (classic)**
+```
+▸ auth/login.go:6 — bcrypt hash comparison
+  🔵 Codex: "Wrap with subtle.ConstantTimeCompare to prevent timing attacks"
+  🟢 Gemini: "bcrypt is already constant-time. Wrapping is cargo-cult"
+  ⚖️ Decision: You pick based on threat model
+```
+
+**Frontend (cache strategy)**
+```
+▸ cache.ts:42 — invalidate on write or subscribe to events?
+  🔵 Codex: "Always revalidate on write (predictable, simpler)"
+  🟢 Gemini: "Event subscription scales better; write-revalidate causes cache storms"
+  ⚖️ Decision: You pick based on traffic patterns and SLA
+```
+
+**API Design (pagination)**
+```
+▸ pagination.go:18 — cursor vs offset pagination?
+  🔵 Codex: "Offset is simpler, users expect it"
+  🟢 Gemini: "Cursor is O(1), offset is O(n) on deletion; pick by growth rate"
+  ⚖️ Decision: You pick based on data churn and growth projections
+```
+
+That disagreement is where ccg earns its cost. See a full-depth example below.
+
+## Try it — a complete walkthrough
 
 Say you just edited `auth/login.go`:
 
@@ -154,7 +194,7 @@ the DIVERGENCE action, add error logging, and you're good to merge.
 | **AGREEMENT** | Both Codex and Gemini flagged the same thing. Your single-source Claude likely catches these too — **low new information**. | Skim, fix if not already done. |
 | **DIVERGENCE** ★ | The two models disagreed. **This is the whole reason ccg exists.** Claude's "Action" line gives you a recommendation, but you're the final decider. | Read carefully. Apply Claude's call or override it. |
 | **BLINDSPOT** | Neither model raised it, but Claude noticed something while synthesizing. **Use sparingly** — limit 2 per run. | Treat as a hint, not gospel. |
-| **VERDICT** | `merge` / `fix-required` / `discuss`. One-line summary. | Use as merge gate. |
+| **VERDICT** | `merge` / `fix-required` / `discuss`. One-line summary. | **Use as your merge gate.** |
 
 After the review, `ccg_ledger_record` writes one JSONL line to your ledger. Two weeks from now you can:
 
@@ -183,8 +223,10 @@ Common knobs (full list in [Architecture → §5](docs/ARCHITECTURE.md#5-extensi
 | `CCG_MODE` | `auto` | `auto` / `cost` / `balanced` / `quality` |
 | `CCG_CACHE_TTL_HOURS` | `24` | Cache TTL |
 | `CCG_MAX_PROMPT_KB` | `100` | Per-call prompt size cap |
+| `CCG_NO_HISTORY` | `0` | Set to `1` to disable review history injection |
+| `CCG_HISTORY_MAX` | `3` | Max number of prior reviews to inject |
 
-Cost reference (USD per call, after cache):
+Cost reference (USD per call, after cache hit):
 
 | Mode | Codex | Gemini | Typical cost |
 |---|---|---|---|
@@ -192,19 +234,23 @@ Cost reference (USD per call, after cache):
 | `balanced` | gpt-5-mini  | gemini-2.5-flash      | ~$0.0046 |
 | `quality`  | gpt-5       | gemini-2.5-pro        | ~$0.0440 |
 
-See accumulated spend any time:
+Track your spend:
 
 ```bash
 source ~/.claude/commands/ccg.sh
-ccg_usage --this-month
+ccg_usage --this-month      # monthly breakdown by provider
+ccg_usage --all             # cumulative
 ```
 
-## Not for
+## Not for (scope boundaries)
 
-- IDEs other than Claude Code (try [zen-mcp-server](https://github.com/BeehiveInnovations/zen-mcp-server))
-- Replacing static analysis (pair with Semgrep / CodeQL)
-- Auto-running on every PR (ccg is a triage tool, not a bot)
-- Streaming or multi-turn conversation
+ccg is purpose-built for high-judgment code reviews. It's *not* a replacement for:
+
+- **Static analysis** — pair it with Semgrep / CodeQL, don't use it instead
+- **Linters or formatters** — those catch style; ccg catches architecture
+- **Automated gating** — ccg is a triage tool, not a bot (don't auto-run on every PR)
+- **Streaming dialogue** — ccg is one-shot; for multi-turn conversation use the Codex / Gemini CLIs directly
+- **IDEs other than Claude Code** — try [zen-mcp-server](https://github.com/BeehiveInnovations/zen-mcp-server) for VS Code / JetBrains
 
 ## Architecture & contributing
 

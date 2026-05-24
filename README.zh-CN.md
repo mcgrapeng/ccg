@@ -76,13 +76,9 @@ Codex / Gemini CLI 都不告诉你花了多少钱。ccg 记录每次调用，按
 
 ## 怎么安装
 
-二选一：
+一行命令（无需 Node）：
 
 ```bash
-# npm（推荐）
-npx @mcgrapeng/ccg install
-
-# 或 curl 一行装，无需 Node
 curl -fsSL https://raw.githubusercontent.com/mcgrapeng/ccg/main/scripts/curl-install.sh | bash
 ```
 

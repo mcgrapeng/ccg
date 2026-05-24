@@ -76,13 +76,9 @@ Codex / Gemini CLI は支出を教えません。ccg は全呼び出しを記録
 
 ## インストール
 
-どちらかを選択：
+ワンライナー（Node 不要）：
 
 ```bash
-# npm (推奨)
-npx @mcgrapeng/ccg install
-
-# または curl ワンライナー、Node 不要
 curl -fsSL https://raw.githubusercontent.com/mcgrapeng/ccg/main/scripts/curl-install.sh | bash
 ```
 

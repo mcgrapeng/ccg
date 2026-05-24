@@ -23,6 +23,7 @@
   },
   "license": "MIT",
   "author": "mcgrapeng",
+  "private": true,
   "type": "commonjs",
   "engines": {
     "node": ">=16"
@@ -30,22 +31,6 @@
   "os": [
     "darwin",
     "linux"
-  ],
-  "bin": {
-    "ccg": "bin/ccg.js"
-  },
-  "main": "bin/ccg.js",
-  "files": [
-    "bin/",
-    "ccg.sh",
-    "ccg.md",
-    "scripts/",
-    "LICENSE",
-    "README.md",
-    "README.zh-CN.md",
-    "README.ja.md",
-    "README.ko.md",
-    "CHANGELOG.md"
   ],
   "scripts": {
     "test": "bash tests/test_ccg.sh",

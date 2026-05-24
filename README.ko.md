@@ -76,13 +76,9 @@ Codex / Gemini CLI는 지출을 알려주지 않습니다. ccg는 모든 호출�
 
 ## 설치
 
-둘 중 선택:
+한 줄 명령 (Node 불필요):
 
 ```bash
-# npm (권장)
-npx @mcgrapeng/ccg install
-
-# 또는 curl 한 줄 설치, Node 불필요
 curl -fsSL https://raw.githubusercontent.com/mcgrapeng/ccg/main/scripts/curl-install.sh | bash
 ```
 

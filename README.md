@@ -76,17 +76,13 @@ Codex/Gemini CLIs don't tell you what you spent. ccg logs every call, picks the 
 
 ## Install
 
-Pick one:
+One-liner (no Node required):
 
 ```bash
-# npm (recommended)
-npx @mcgrapeng/ccg install
-
-# or curl one-liner, no Node
 curl -fsSL https://raw.githubusercontent.com/mcgrapeng/ccg/main/scripts/curl-install.sh | bash
 ```
 
-Then install the AI CLIs once:
+Then install the AI CLIs (one-time):
 
 ```bash
 npm i -g @openai/codex @google/gemini-cli

@@ -3,22 +3,19 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/mcgrapeng/ccg/main/scripts/curl-install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/mcgrapeng/ccg/main/scripts/curl-install.sh | bash -s -- --version v3.0.0
+#   curl -fsSL ... | bash -s -- --version v3.2.0
 #
-# What it does:
-#   1. Downloads the requested release tarball from GitHub Releases (default: latest)
-#   2. Extracts ccg.sh + ccg.md into ~/.claude/commands/
-#   3. Runs preflight checks (Codex / Gemini / API key)
+# Defaults to jsdelivr CDN for cross-region reliability (especially mainland China),
+# falls back to raw.githubusercontent.com if jsdelivr is unreachable.
 #
-# No npm / Node.js required. Just bash + curl + tar.
+# No npm / Node.js required. Just bash + curl.
 set -eu
 
 REPO="${CCG_REPO_OVERRIDE:-mcgrapeng/ccg}"
 TAG="${CCG_VERSION:-latest}"
 TARGET_DIR="${HOME}/.claude/commands"
-TMPDIR="$(mktemp -d -t ccg-install.XXXXXXXX)"
-cleanup() { rm -rf "$TMPDIR"; }
-trap cleanup EXIT
+
+CURL_OPTS="-fsSL --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 2"
 
 # parse flags
 while [ $# -gt 0 ]; do
@@ -29,56 +26,97 @@ while [ $# -gt 0 ]; do
       cat <<EOF
 Usage: install.sh [--version <tag>]
 
-Installs the /ccg slash command into ~/.claude/commands/ from GitHub Releases.
+Installs the /ccg slash command into ~/.claude/commands/ from GitHub
+(via jsdelivr CDN by default; falls back to raw.githubusercontent.com).
 
 Options:
   --version <tag>    Install a specific release (default: latest)
-                     Example: --version v3.0.0
+                     Example: --version v3.2.0
 
 Environment:
   CCG_REPO_OVERRIDE  Override repo (default: mcgrapeng/ccg)
+  CCG_NO_CDN=1       Skip jsdelivr; use raw.githubusercontent.com only
 EOF
       exit 0 ;;
     *) echo "Unknown flag: $1" >&2; exit 2 ;;
   esac
 done
 
-# Resolve "latest" → actual tag via GitHub API (no auth required for public repos)
+# Resolve "latest" → actual tag via GitHub API
+# (api.github.com is usually reachable even when github.com archive is slow)
 if [ "$TAG" = "latest" ]; then
   echo "→ Resolving latest release of $REPO ..."
   if command -v jq >/dev/null 2>&1; then
-    TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | jq -r .tag_name)
+    TAG=$(curl $CURL_OPTS "https://api.github.com/repos/$REPO/releases/latest" | jq -r .tag_name)
   else
-    TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
+    TAG=$(curl $CURL_OPTS "https://api.github.com/repos/$REPO/releases/latest" \
       | grep -E '"tag_name"' | head -1 | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/')
   fi
-  [ -n "$TAG" ] && [ "$TAG" != "null" ] || { echo "FATAL: could not resolve latest release tag" >&2; exit 2; }
+  if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+    echo "FATAL: could not resolve latest release tag" >&2
+    echo "  Try: bash -s -- --version v3.2.0" >&2
+    exit 2
+  fi
 fi
 echo "→ Installing $REPO@$TAG"
 
-TARBALL_URL="https://github.com/$REPO/archive/refs/tags/$TAG.tar.gz"
-ARCHIVE="$TMPDIR/ccg.tar.gz"
+# Download a single file. Tries jsdelivr first (fast in mainland China + global CDN),
+# then falls back to raw.githubusercontent.com.
+download_file() {
+  rel_path="$1"
+  dest="$2"
 
-echo "→ Downloading $TARBALL_URL"
-curl -fsSL -o "$ARCHIVE" "$TARBALL_URL" || { echo "FATAL: download failed" >&2; exit 2; }
+  if [ "${CCG_NO_CDN:-0}" != "1" ]; then
+    url="https://cdn.jsdelivr.net/gh/$REPO@$TAG/$rel_path"
+    echo "  → $url"
+    if curl $CURL_OPTS -o "$dest" "$url" 2>/dev/null; then
+      return 0
+    fi
+    echo "  (jsdelivr failed, trying raw.githubusercontent.com)"
+  fi
 
-echo "→ Extracting"
-tar -xzf "$ARCHIVE" -C "$TMPDIR"
-SRC_DIR=$(find "$TMPDIR" -maxdepth 1 -type d -name 'ccg-*' | head -1)
-[ -d "$SRC_DIR" ] || { echo "FATAL: extracted dir not found" >&2; exit 2; }
+  url="https://raw.githubusercontent.com/$REPO/$TAG/$rel_path"
+  echo "  → $url"
+  if curl $CURL_OPTS -o "$dest" "$url" 2>/dev/null; then
+    return 0
+  fi
 
-[ -r "$SRC_DIR/ccg.sh" ] || { echo "FATAL: ccg.sh missing in archive" >&2; exit 2; }
-[ -r "$SRC_DIR/ccg.md" ] || { echo "FATAL: ccg.md missing in archive" >&2; exit 2; }
+  return 1
+}
+
+TMPDIR="$(mktemp -d -t ccg-install.XXXXXXXX)"
+trap 'rm -rf "$TMPDIR"' EXIT
+
+echo "→ Downloading ccg.sh"
+if ! download_file "ccg.sh" "$TMPDIR/ccg.sh"; then
+  echo "FATAL: could not download ccg.sh from any source" >&2
+  echo "  Network issue? Try setting a proxy or use:" >&2
+  echo "    CCG_NO_CDN=1 bash -s -- --version $TAG" >&2
+  exit 2
+fi
+
+echo "→ Downloading ccg.md"
+if ! download_file "ccg.md" "$TMPDIR/ccg.md"; then
+  echo "FATAL: could not download ccg.md from any source" >&2
+  exit 2
+fi
+
+# Sanity check downloaded files
+[ -s "$TMPDIR/ccg.sh" ] || { echo "FATAL: ccg.sh downloaded but empty" >&2; exit 2; }
+[ -s "$TMPDIR/ccg.md" ] || { echo "FATAL: ccg.md downloaded but empty" >&2; exit 2; }
+head -1 "$TMPDIR/ccg.sh" | grep -q '^#!' \
+  || { echo "FATAL: ccg.sh doesn't look like a shell script" >&2; exit 2; }
 
 echo "→ Installing to $TARGET_DIR"
 mkdir -p "$TARGET_DIR"
-install -m 0755 "$SRC_DIR/ccg.sh" "$TARGET_DIR/ccg.sh"
-install -m 0644 "$SRC_DIR/ccg.md" "$TARGET_DIR/ccg.md"
+install -m 0755 "$TMPDIR/ccg.sh" "$TARGET_DIR/ccg.sh"
+install -m 0644 "$TMPDIR/ccg.md" "$TARGET_DIR/ccg.md"
 echo "  ✓ $TARGET_DIR/ccg.sh"
 echo "  ✓ $TARGET_DIR/ccg.md"
 
 echo
 echo "→ Preflight checks:"
+# shellcheck disable=SC1091
 . "$TARGET_DIR/ccg.sh"
 out=$(ccg_preflight)
 echo "$out" | sed 's/^/  /'

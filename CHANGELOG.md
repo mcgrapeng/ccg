@@ -2,6 +2,52 @@
 
 All notable changes to /ccg.
 
+## [3.2.0] — 2026-05-24
+
+Closes the L6 loop: the ledger goes from write-only to bidirectional. Each `/ccg` now reads prior reviews on the touched files and injects them into the next prompt — recurring patterns and unresolved `fix-required` items no longer evaporate between sessions. 121-test regression (+10 new); safe drop-in upgrade from 3.1.0.
+
+### Added — Ledger consumer (closes the moat loop)
+- **`ccg_ledger_context <diff_file>`** — new public helper. Extracts touched paths from the diff, greps the ledger for JSON-quoted `"<path>"` matches (fixed-string, so `src/foo.ts` won't false-match `src/foobar.ts`), dedups, takes the last `CCG_HISTORY_MAX` (default 3) most-recent entries, and writes them as a structured Markdown block to `<workdir>/history.txt` for prompt embedding. Pure shell (grep + sed) — no extra LLM call, millisecond-level overhead.
+- **`ccg.md` step 2.5** — new protocol step between `ccg_diff_capture` (L3) and `ccg_risk_score` (L5). Claude embeds `history.txt` into both Codex and Gemini prompts before the diff, so both reviewers see "what we already argued about on these files" as prior context.
+- **New env knobs**:
+  - `CCG_NO_HISTORY=1` — disable consumer (useful for "single-perspective baseline" reviews or debugging).
+  - `CCG_HISTORY_MAX=<n>` — cap injected entries (default 3; larger N inflates prompt size).
+- **Dispatch subcommand** `bash ccg.sh ledger_context <diff_file>` for standalone shell use.
+- **Status sentinels** parallel to existing helpers:
+  - `CCG_HISTORY_OK=<n>_matches_<max>_max` + `CCG_HISTORY_FILE=<path>`
+  - `CCG_HISTORY_NONE=0_matches` (ledger exists but no path overlap)
+  - `CCG_HISTORY_SKIPPED=<disabled|no-diff|no-ledger|no-paths-in-diff>`
+  - `CCG_HISTORY_FAIL=<reason>`
+
+### Fixed — cross-shell `local var` footgun (zsh)
+- **Critical**: zsh treats `local var` (without `=`) as a *print* operation — it dumps the variable's current value to stdout. Declaring locals *inside* a loop body silently leaked iteration N-1's values into output files on machines where the user's default shell is zsh (i.e., when Claude Code's Bash tool inherits zsh as the underlying shell).
+- Discovered during smoke-testing of `ccg_ledger_context`: iteration 2's `local ts sha mode ...` printed iteration 1's values into the rendered `history.txt`.
+- Fix: hoist all loop-mutated locals once outside the while loop. Regression locked in by test 15.9 ("history.txt contains NO bash/zsh debug-leak lines").
+- Architecture decision table updated with the rule: **inside loop bodies, `local var=` (with `=`) is mandatory** — bash treats `local var` and `local var=` identically, but zsh does not.
+
+### Documentation
+- `docs/ARCHITECTURE.md` — new "L6 consumer" subsection in §3 covering algorithm, value proposition, the zsh footgun, and knobs. Data-flow diagram (§4) updated to include the new step. Design-decision table (§7) gains a row about `local var=`. Moat section (§9) reframed: L6 = ledger + consumer (the consumer is what compounds the data within a session).
+- 4-language sync: `docs/ARCHITECTURE.{zh-CN,ja,ko}.md` mirror all of the above.
+- README.md "Why ccg" §3 (and all 3 mirrors) updated to mention the auto-injection behavior.
+- `ccg.md` configuration table gains `CCG_NO_HISTORY` + `CCG_HISTORY_MAX` rows; troubleshooting table gains rows for `CCG_HISTORY_SKIPPED=no-ledger` and `CCG_HISTORY_NONE=0_matches`.
+
+### Tests
+- 10 new test cases (15.1 - 15.10):
+  - Skip paths (disabled / no-ledger / no-diff / no-paths-in-diff)
+  - NONE return on path-mismatch
+  - History file write + content correctness (ts/sha/mode for matched entries only)
+  - `CCG_HISTORY_MAX` enforcement
+  - **15.9 zsh regression guard** — asserts `history.txt` contains no bare `ts=` / `sha=` / `synth=` lines at column 1 (would re-appear if a future contributor moves `local` declarations back inside the loop)
+  - Dispatch subcommand exposed via `bash ccg.sh ledger_context`
+- Suite total: 111 → 121, all passing. Runtime ~32s (unchanged).
+
+### Compatibility
+- Drop-in safe from 3.1.0. New behavior is enabled by default but degrades to a no-op when:
+  - Ledger doesn't exist yet (first runs)
+  - Current diff touches files no prior review covers
+  - User sets `CCG_NO_HISTORY=1`
+- No changes to existing function signatures. No changes to ledger record format (the consumer reads what `ccg_ledger_record` already writes).
+
 ## [3.1.0] — 2026-05-23
 
 Documentation and discoverability release. No core behavior changes; safe drop-in upgrade from 3.0.0.

@@ -31,6 +31,8 @@ ccg 是 **在 Claude Code 里调用 Codex + Gemini CLI 的生产级编排层**�
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L6  评审账本           ccg_ledger_record / ccg_ledger_query             │
 │      JSONL append-only，grep 可查，机密脱敏                              │
+│      + ccg_persist_report → <repo>/.ccg/reports/<sha>_<ts>.md            │
+│      + ccg_ledger_context → history.txt 注入下次 prompt                  │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L5  风险路由           ccg_risk_score                                   │
 │      纯规则评分 diff → cost / balanced / quality                         │
@@ -174,6 +176,38 @@ CCG_RISK_REASONS=auth+40 sql_interp+30 size>300+15 docs_only-40
 
 **删了这层：** ccg 变成 100% 无状态。每次评审从头开始。L7 产品故事仍能跑，但长期差异化没了。
 
+#### L6 消费者 — `ccg_ledger_context`（闭环）
+
+没有消费者，ledger 就是只写日记本——明明历史里有"上次为这文件吵过什么"的答案，但每次评审都得从头来。`ccg_ledger_context <diff_file>` 是双向化的另一半：
+
+1. 从 diff 抽取触及的路径（解析 `diff --git a/<path>` 头）。
+2. 对每个路径在 ledger 中做 JSON-quoted `"<path>"` 的固定串匹配（避免 `src/foo.ts` 误匹配 `src/foobar.ts`）。
+3. 去重，取最近 `CCG_HISTORY_MAX`（默认 3）条。
+4. 渲染为结构化 Markdown 写入 `<workdir>/history.txt`。
+
+协议层（`ccg.md` 步骤 2.5）把 `history.txt` 拼到 Codex 与 Gemini 的 prompt 里，让两位 reviewer 看到：
+
+```
+=== PRIOR REVIEWS (last 3 entries touching these paths) ===
+- [2026-05-20T12:00:00Z] sha=ghi9abc mode=quality lines=+8-1
+  paths: ["auth/login.go","auth/session.go"]
+  synthesis: BLINDSPOT: error logging missing. fix-required.
+...
+```
+
+为什么重要：
+- **Recurring patterns 浮出水面。**"上次我们就 constant-time compare 吵过——这次 PR 是不是又来一遍？"
+- **未解决的 `fix-required` 不会自然消亡。**如果上次 verdict 是 `fix-required`，但本次 diff 没解决，两位 reviewer 都能提示。
+- **零额外 LLM 调用。**`ccg_ledger_context` 是纯 shell（grep + sed），毫秒级开销。
+
+**跨 shell footgun（值得记录）：** `ccg.sh` 被 Claude Code 的 Bash tool source 到用户默认 shell（bash 用户得 bash，**zsh 用户得 zsh**）。zsh 的 `local var`（**不带 `=`**）会**把变量的现有值打印到 stdout**。如果 `local` 声明写在 while 循环体内，第 N 次迭代会把第 N-1 次的值泄漏到 `history.txt`。修复：所有循环内可变 local 一次性写在循环外。Test 15.9 锁定这条回归。
+
+旋钮：
+- `CCG_NO_HISTORY=1` 关闭消费者（想要"单视角基线"评审时用）。
+- `CCG_HISTORY_MAX=<n>` 限制注入条数（默认 3；过大会推高 prompt 体积）。
+
+**删了这个伴生：** ccg 退回完全无状态。L6 退化成只写日记本——靠数据沉淀仍是护城河，但在一次 session 内拿不到复利。
+
 ---
 
 ### L7 — 分歧综合（Claude 端）
@@ -227,7 +261,13 @@ ccg_risk_score "$CCG_DIR/diff.txt"                          ── L5
   └─ Claude 按推荐 export CCG_MODE
        │
        ▼
-[Claude 写 codex.prompt + gemini.prompt — 同内容]           ── 协议
+ccg_ledger_context "$CCG_DIR/diff.txt"                      ── L6 消费者
+  └─ grep ledger 取触及相同路径的过往评审
+  └─ 写 history.txt（≤ CCG_HISTORY_MAX 条）供 prompt 嵌入
+       │
+       ▼
+[Claude 写 codex.prompt + gemini.prompt — 同内容；           ── 协议
+ history.txt 若存在则拼到 diff 之前]
        │
        ▼
 ccg_codex   ─ 并行 ─  ccg_gemini                            ── L1 + L2
@@ -314,7 +354,7 @@ CCG_RISK_REASONS=<信号+权重 信号+权重 ...>
 
 ## 6. 测试套件验证的不变量
 
-`tests/test_ccg.sh` 强制这些——最近一次跑 99 个测试。违反任一会破 CI。
+`tests/test_ccg.sh` 强制这些——最近一次跑 121 个测试。违反任一会破 CI。
 
 | 不变量 | 为什么 |
 |---|---|
@@ -344,6 +384,7 @@ CCG_RISK_REASONS=<信号+权重 信号+权重 ...>
 | `~/.ccg/` 迁移用 `mv` 不用 `cp` | 可能留下孤儿 | 旧 `~/.ccg/` 用户显式 opt-in 了 env 变量；复制留下重复。我们一次性 move；空 dir 才删 |
 | `ccg_cleanup` 拒绝符号链接，不只是 `..` | "路径遍历"是常见唬人话术 | `mktemp` 已经防 `..`。符号链接才是真实攻击面（清理过程中 swap 的 TOCTOU 竞态） |
 | Slash command 协议活在 `ccg.md` 不在代码里 | 代码即文档看着更干净 | Claude 把 `ccg.md` 当协议规范读。Bash 代码不能当 Claude 的 prompt；这是 slash command 的本质。把协议（md）和原语（sh）分开是正确边界 |
+| 循环体内的 `local var=`（带 `=`）是强制的 | bash 里 `local var` 和 `local var=` 行为一致 | zsh 的 `local var`（**不带 `=`**）会把变量的现有值打印到 stdout。`ccg.sh` 被 zsh 用户的 Claude Code Bash tool source——把第 N-1 次迭代的值泄漏到 prompt 或输出文件是真实 bug。Test 15.9 锁这条 |
 
 ---
 
@@ -363,10 +404,11 @@ ccg 故意**不**做这些，以及原因。
 
 营销定位喊的：**分歧检测**（L7）。
 
-工程护城河实际是 **L6（账本） + L4（用量）**：
+工程护城河实际是 **L6（账本 + 消费者） + L4（用量）**：
 
 - L7 一周就能被抄。任何团队知道 `gpt-5-mini` + `gemini-2.5-flash` 就能复刻同样的把戏。
 - L6 + L4 产出**按用户累积的数据**。重度用户用 6 个月后，有了竞品复制不出来的个人历史记录——人家要从第 1 次 review 开始攒。
+- `ccg_ledger_context` 消费者（2026-05 加入）让这份数据在 session 内**复利**：每次评审都用过往评审做上下文。没它，ledger 是只写日记本；有它，每次同一文件的评审都站在上次肩膀上。
 
 如果你要决定先加固哪个，**先加固 L6 + L4**。
 
@@ -381,7 +423,7 @@ ccg/
 ├── bin/ccg.js                   → Node CLI wrapper (install / uninstall / doctor / about)
 ├── scripts/install.sh           → 本地 clone 安装器
 ├── scripts/curl-install.sh      → 远程一行装
-├── tests/test_ccg.sh            → 99 个回归 + 对抗测试 (L1–L6)
+├── tests/test_ccg.sh            → 121 个回归 + 对抗测试 (L1–L6)
 ├── README.md                    → 英文入口（zh-CN / ja / ko 镜像）
 ├── docs/ARCHITECTURE.md         → 英文架构文档
 ├── docs/ARCHITECTURE.zh-CN.md   → 本文档

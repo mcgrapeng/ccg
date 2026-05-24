@@ -31,6 +31,8 @@ ccg は **Claude Code 内から Codex + Gemini CLI を呼び出すための prod
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L6  Review ledger          ccg_ledger_record / ccg_ledger_query        │
 │      JSONL append-only, grep 可能, 機密リダクション済み                  │
+│      + ccg_persist_report → <repo>/.ccg/reports/<sha>_<ts>.md            │
+│      + ccg_ledger_context → history.txt を次のプロンプトに注入           │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L5  Risk-aware routing     ccg_risk_score                              │
 │      Pure-rule scoring on diff → cost / balanced / quality              │
@@ -174,6 +176,38 @@ CCG_RISK_REASONS=auth+40 sql_interp+30 size>300+15 docs_only-40
 
 **この層を削ると:** ccg が 100% ステートレスになる。毎レビューがゼロから始まる。L7 プロダクトストーリーは機能するが、長期差別化が消える。
 
+#### L6 コンシューマー — `ccg_ledger_context`（ループを閉じる）
+
+コンシューマーがなければ、ledger は書き込み専用の日記帳 — 「このファイルで以前何を議論したか」の答えが ledger にあるのに、毎回ゼロから始める。`ccg_ledger_context <diff_file>` が双方向化のもう半分:
+
+1. diff から触れたパスを抽出（`diff --git a/<path>` ヘッダを解析）。
+2. ledger を JSON-quoted `"<path>"` で固定文字列マッチ検索（`src/foo.ts` が `src/foobar.ts` と誤マッチしないように）。
+3. 重複除去、`CCG_HISTORY_MAX`（既定 3）件まで取得（最新優先）。
+4. `<workdir>/history.txt` へ構造化 Markdown として書き出し。
+
+プロトコル層（`ccg.md` ステップ 2.5）が `history.txt` を Codex と Gemini のプロンプトに差し込み、両レビュアーはこう見る:
+
+```
+=== PRIOR REVIEWS (last 3 entries touching these paths) ===
+- [2026-05-20T12:00:00Z] sha=ghi9abc mode=quality lines=+8-1
+  paths: ["auth/login.go","auth/session.go"]
+  synthesis: BLINDSPOT: error logging missing. fix-required.
+...
+```
+
+なぜ重要か:
+- **再発パターンが可視化される。**「前回 constant-time compare で揉めた — この PR は同じ話を繰り返してないか?」
+- **未解決の `fix-required` が風化しない。**前回 verdict が `fix-required` で、今回の diff が解決していなければ、両レビュアーが指摘できる。
+- **追加 LLM コール ゼロ。** `ccg_ledger_context` は純シェル（grep + sed）、ミリ秒オーダー。
+
+**クロスシェル footgun（記録する価値あり）:** `ccg.sh` は Claude Code Bash tool を介してユーザーのデフォルトシェル（bash ユーザは bash、**zsh ユーザは zsh**）に source される。zsh の `local var`（**`=` なし**）は変数の現在値を stdout に出力する。`local` 宣言を while ループ本体に置いていたら、N 回目のイテレーションが N-1 回目の値を `history.txt` に漏らす。修正: ループで変化するローカルはすべて一度だけループ外で宣言。テスト 15.9 がこの回帰をロックする。
+
+ノブ:
+- `CCG_NO_HISTORY=1` でコンシューマーを完全に無効化（"単視点ベースライン"レビューが欲しいとき）。
+- `CCG_HISTORY_MAX=<n>` で注入件数を制限（既定 3；大きすぎるとプロンプトサイズが膨らむ）。
+
+**このコンパニオンを削ると:** ccg は完全ステートレスに戻る。L6 は書き込み専用日記帳に逆戻り — データ蓄積による堀は残るが、セッション内での複利は失われる。
+
 ---
 
 ### L7 — 分岐合成（Claude 側）
@@ -227,7 +261,13 @@ ccg_risk_score "$CCG_DIR/diff.txt"                           ── L5
   └─ Claude が CCG_MODE を適宜 export
        │
        ▼
-[Claude が codex.prompt + gemini.prompt を書く — 同内容]     ── protocol
+ccg_ledger_context "$CCG_DIR/diff.txt"                       ── L6 コンシューマー
+  └─ 同一パスに触れた過去レビューを ledger から grep
+  └─ history.txt を書き出し（≤ CCG_HISTORY_MAX 件）プロンプト埋込用
+       │
+       ▼
+[Claude が codex.prompt + gemini.prompt を書く — 同内容、     ── protocol
+ history.txt がある場合は diff の前に付加]
        │
        ▼
 ccg_codex   ─ 並列 ─  ccg_gemini                            ── L1 + L2
@@ -315,7 +355,7 @@ CCG_RISK_REASONS=<signal+weight signal+weight ...>
 
 ## 6. テストスイートが検証する不変条件
 
-`tests/test_ccg.sh` が強制 — 最近のカウントで 99 テスト。これらに違反するコードは CI を壊す。
+`tests/test_ccg.sh` が強制 — 最近のカウントで 121 テスト。これらに違反するコードは CI を壊す。
 
 | 不変条件 | なぜ |
 |---|---|
@@ -345,6 +385,7 @@ CCG_RISK_REASONS=<signal+weight signal+weight ...>
 | `~/.ccg/` 移行は非破壊（`cp` でなく `mv`） | 孤児を残しうる | 旧 `~/.ccg/` ユーザーは env 変数で明示的に opt-in した; コピーは複製を残す。初回遭遇時に 1 度移動; ディレクトリは空のときのみ削除 |
 | `ccg_cleanup` は `..` だけでなくシンボリックリンクも拒否 | 「パストラバーサル」は通常の脅威 | `mktemp` が既に `..` を防ぐ。シンボリックリンクが実際の攻撃面（クリーンアップ中の symlink swap の TOCTOU レース） |
 | Slash command プロトコルは `ccg.md` に住む、コード内ではない | コード即ドキュメントの方が綺麗 | Claude が `ccg.md` をプロトコル仕様として読む。Bash コードは Claude の prompt にはなれない; これが slash command の本質。プロトコル（md）と原語（sh）を分けるのが正しい境界 |
+| ループ本体内では `local var=`（`=` 付き）必須 | bash は `local var` と `local var=` を同じに扱う | zsh の `local var`（`=` なし）は変数の現在値を stdout に出力する。`ccg.sh` は zsh ユーザの Claude Code Bash tool が source する — 前回イテレーションの値が prompt や出力ファイルに漏れるのは本物のバグ。Test 15.9 がガード |
 
 ---
 
@@ -364,10 +405,11 @@ ccg が意図的に**しない**こと、およびその理由。
 
 マーケティングポジション: **分岐検出** (L7)。
 
-エンジニアリングの堀は **L6（台帳） + L4（使用量）**:
+エンジニアリングの堀は **L6（台帳 + コンシューマー） + L4（使用量）**:
 
 - L7 は 1 週間で複製可能。`gpt-5-mini` + `gemini-2.5-flash` を知るチームなら同じトリックを実行できる。
 - L6 + L4 は**ユーザーごとに蓄積するデータ**を生む。ヘビーユーザーは 6 か月後、競合が複製できない個人的歴史記録を持つ — 競合は review #1 から始めなければならない。
+- `ccg_ledger_context` コンシューマー（2026-05 追加）はそのデータをセッション内で**複利化**する: 各レビューは過去のレビューをコンテキストとして使う。これがなければ ledger は書き込み専用の日記帳; これがあれば、同じファイルへの各レビューは前回の肩の上に立つ。
 
 何を先に強化するか優先順位を決めるなら、**L6 + L4 を先に**。
 
@@ -382,7 +424,7 @@ ccg/
 ├── bin/ccg.js                   → Node CLI wrapper (install / uninstall / doctor / about)
 ├── scripts/install.sh           → ローカルクローンインストーラ
 ├── scripts/curl-install.sh      → リモートワンライナーインストーラ
-├── tests/test_ccg.sh            → L1–L6 用 111 回帰 + 敵対的テスト
+├── tests/test_ccg.sh            → L1–L6 用 121 回帰 + 敵対的テスト
 ├── README.md                    → 英語エントリーポイント (zh-CN / ja / ko ミラー)
 ├── docs/ARCHITECTURE.md         → 英語アーキテクチャドキュメント
 ├── docs/ARCHITECTURE.ja.md      → 本書

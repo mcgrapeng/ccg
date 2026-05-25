@@ -46,6 +46,12 @@ ccg is a **production-grade orchestrator for calling Codex + Gemini CLI from ins
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L1  Safe CLI scheduling    _ccg_run_with_timeout / _ccg_redact /       │
 │      ccg_cleanup / _ccg_check_prompt_size / mktemp 700 isolation        │
+├─────────────────────────────────────────────────────────────────────────┤
+│  L0  VCS abstraction        _ccg_vcs_detect / _ccg_vcs_root /           │
+│      _ccg_vcs_info / _ccg_svn_diff                                      │
+│      git + SVN 1.7+ (svn diff --git → standard unified diff format)     │
+│      + ccg_precommit_gate  → commit gate (exit 0/1 on verdict)          │
+│      + ccg_install_hook / ccg_uninstall_hook                            │
 └─────────────────────────────────────────────────────────────────────────┘
 
        ↑                                       ↑

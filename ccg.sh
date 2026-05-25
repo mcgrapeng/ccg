@@ -55,6 +55,100 @@ _ccg_xdg_data_dir()   { printf '%s/ccg\n' "${XDG_DATA_HOME:-$HOME/.local/share}"
 _ccg_xdg_cache_dir()  { printf '%s/ccg\n' "${XDG_CACHE_HOME:-$HOME/.cache}"; }
 _ccg_xdg_config_dir() { printf '%s/ccg\n' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
 
+# ============================================================
+# Internal: VCS abstraction layer (git + svn)
+#
+# _ccg_vcs_detect          → stdout: git | svn | none
+# _ccg_vcs_root            → stdout: repo/wc root path; exit 2 if not in repo
+# _ccg_vcs_info            → stdout: branch=<b> sha=<s>; best-effort, empty fields ok
+# _ccg_vcs_capture_diff    → writes git-format diff to $1; returns same codes as
+#                            ccg_diff_capture (0=ok, 1=empty, 2=not-in-repo, 127=missing)
+#
+# SVN note: `svn diff --git` (SVN 1.7+) emits standard unified diff with
+# "diff --git a/... b/..." headers, so all downstream parsers (risk_score,
+# ledger_record, ledger_context) work without modification.
+# ============================================================
+
+_ccg_vcs_detect() {
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "git"
+  elif command -v svn >/dev/null 2>&1 && svn info >/dev/null 2>&1; then
+    echo "svn"
+  else
+    echo "none"
+  fi
+}
+
+_ccg_vcs_root() {
+  local vcs
+  vcs=$(_ccg_vcs_detect)
+  case "$vcs" in
+    git) git rev-parse --show-toplevel 2>/dev/null; return 0 ;;
+    svn) svn info --show-item wc-root 2>/dev/null; return 0 ;;
+    *)   return 2 ;;
+  esac
+}
+
+_ccg_vcs_info() {
+  local vcs
+  vcs=$(_ccg_vcs_detect)
+  case "$vcs" in
+    git)
+      local branch sha
+      branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+      sha=$(git rev-parse --short HEAD 2>/dev/null || echo "WIP")
+      printf 'branch=%s\nsha=%s\n' "${branch:-}" "${sha:-WIP}"
+      ;;
+    svn)
+      local rel rev
+      rel=$(svn info --show-item relative-url 2>/dev/null \
+            | sed 's|^\^/||; s|/.*$||')
+      rev=$(svn info --show-item revision 2>/dev/null)
+      printf 'branch=%s\nsha=r%s\n' "${rel:-}" "${rev:-0}"
+      ;;
+  esac
+}
+
+# _ccg_svn_diff <out_file>
+# 4-level fallback; always produces git-format diff via --git flag.
+_ccg_svn_diff() {
+  local out_file="$1"
+  local diff_text="" source=""
+
+  # Level 1: uncommitted working-copy changes
+  diff_text=$(svn diff --git 2>/dev/null)
+  [ -n "$diff_text" ] && source="worktree"
+
+  # Level 2: last committed revision vs BASE
+  if [ -z "$diff_text" ]; then
+    diff_text=$(svn diff --git -rBASE:HEAD 2>/dev/null)
+    [ -n "$diff_text" ] && source="BASE:HEAD"
+  fi
+
+  # Level 3: previous revision vs HEAD
+  if [ -z "$diff_text" ]; then
+    local rev
+    rev=$(svn info --show-item revision 2>/dev/null)
+    if [ -n "$rev" ] && [ "$rev" -gt 1 ] 2>/dev/null; then
+      diff_text=$(svn diff --git -r$((rev - 1)):$rev 2>/dev/null)
+      [ -n "$diff_text" ] && source="r$((rev-1)):r${rev}"
+    fi
+  fi
+
+  if [ -z "$diff_text" ]; then
+    echo "CCG_DIFF_FAIL=empty-diff"; return 1
+  fi
+
+  printf '%s\n' "$diff_text" > "$out_file"
+  local sidecar
+  sidecar="$(dirname "$out_file")/diff_source.txt"
+  printf '%s\n' "$source" > "$sidecar" 2>/dev/null || :
+  local sz
+  sz=$(wc -c <"$out_file" | tr -d ' ')
+  echo "CCG_DIFF_OK=${sz}b"
+  echo "CCG_DIFF_SOURCE=${source}"
+}
+
 # Migrate ~/.ccg/* to XDG locations on first encounter.
 # Idempotent: only moves if source exists AND destination does NOT.
 _ccg_migrate_legacy() {
@@ -342,13 +436,28 @@ ccg_usage() {
 # ============================================================
 ccg_diff_capture() {
   local out_file="$1"
-  if ! command -v git >/dev/null 2>&1; then
-    echo "CCG_DIFF_FAIL=git-missing"; return 127
-  fi
-  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "CCG_DIFF_FAIL=not-a-git-repo"; return 2
-  fi
+  local vcs
+  vcs=$(_ccg_vcs_detect)
 
+  case "$vcs" in
+    none)
+      echo "CCG_DIFF_FAIL=not-a-vcs-repo"; return 2
+      ;;
+    svn)
+      if ! command -v svn >/dev/null 2>&1; then
+        echo "CCG_DIFF_FAIL=svn-missing"; return 127
+      fi
+      _ccg_svn_diff "$out_file"
+      return $?
+      ;;
+    git)
+      if ! command -v git >/dev/null 2>&1; then
+        echo "CCG_DIFF_FAIL=git-missing"; return 127
+      fi
+      ;;
+  esac
+
+  # git path (unchanged logic)
   local diff_text="" source=""
 
   diff_text=$(git diff HEAD 2>/dev/null)
@@ -380,8 +489,6 @@ ccg_diff_capture() {
   fi
 
   printf '%s\n' "$diff_text" > "$out_file"
-  # Sidecar: persist the source label so later steps (e.g. ccg_persist_report)
-  # can read it across Bash invocations where env vars don't carry over.
   local sidecar
   sidecar="$(dirname "$out_file")/diff_source.txt"
   printf '%s\n' "$source" > "$sidecar" 2>/dev/null || :
@@ -507,13 +614,11 @@ ccg_ledger_record() {
   local ts repo branch sha files lines mode score
   ts=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 
-  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    repo=$(git rev-parse --show-toplevel 2>/dev/null)
-    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-    sha=$(git rev-parse --short HEAD 2>/dev/null)
-  else
-    repo=""; branch=""; sha=""
-  fi
+  local _vcs_info
+  _vcs_info=$(_ccg_vcs_info 2>/dev/null)
+  repo=$(_ccg_vcs_root 2>/dev/null)
+  branch=$(printf '%s\n' "$_vcs_info" | sed -n 's/^branch=//p')
+  sha=$(printf '%s\n' "$_vcs_info" | sed -n 's/^sha=//p')
 
   if [ -s "$risk_file" ]; then
     mode=$(grep '^CCG_RISK_MODE=' "$risk_file" | head -1 | cut -d= -f2)
@@ -791,11 +896,15 @@ ccg_persist_report() {
   local out_dir
   if [ -n "${CCG_REPORT_DIR:-}" ]; then
     out_dir="$CCG_REPORT_DIR"
-  elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    out_dir="$(git rev-parse --show-toplevel 2>/dev/null)/.ccg/reports"
   else
-    echo "CCG_REPORT_SKIPPED=not-a-git-repo"
-    return 0
+    local _vcs_root
+    _vcs_root=$(_ccg_vcs_root 2>/dev/null)
+    if [ -n "$_vcs_root" ]; then
+      out_dir="${_vcs_root}/.ccg/reports"
+    else
+      echo "CCG_REPORT_SKIPPED=not-a-vcs-repo"
+      return 0
+    fi
   fi
 
   if ! mkdir -p "$out_dir" 2>/dev/null; then
@@ -808,13 +917,12 @@ ccg_persist_report() {
   ts_iso=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
   ts_fname=$(date -u +'%Y%m%d-%H%M%S')
 
-  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    repo=$(git rev-parse --show-toplevel 2>/dev/null)
-    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-    sha=$(git rev-parse --short HEAD 2>/dev/null || echo "WIP")
-  else
-    repo=""; branch=""; sha="WIP"
-  fi
+  local _vcs_info
+  _vcs_info=$(_ccg_vcs_info 2>/dev/null)
+  repo=$(_ccg_vcs_root 2>/dev/null)
+  branch=$(printf '%s\n' "$_vcs_info" | sed -n 's/^branch=//p')
+  sha=$(printf '%s\n' "$_vcs_info" | sed -n 's/^sha=//p')
+  : "${sha:=WIP}"
 
   local report_path="$out_dir/${sha:-WIP}_${ts_fname}.md"
 
@@ -1208,13 +1316,268 @@ ccg_cleanup() {
 }
 
 # ============================================================
+# Public: ccg_precommit_gate
+#
+# Run a full ccg review and gate the commit on the verdict.
+# Exit codes: 0=merge (allow), 1=fix-required (block), 2=error
+#
+# Environment:
+#   CCG_GATE_DISCUSS=block|allow  — what to do on "discuss" verdict (default: allow)
+#   CCG_GATE_OFFLINE=1            — skip LLM review, always allow (network unavailable)
+# ============================================================
+ccg_precommit_gate() {
+  if [ "${CCG_GATE_OFFLINE:-0}" = "1" ]; then
+    printf '[ccg gate] offline mode — skipping review, allowing commit\n' >&2
+    return 0
+  fi
+
+  local workdir
+  workdir=$(ccg_init | grep '^CCG_DIR=' | cut -d= -f2-)
+  if [ -z "$workdir" ]; then
+    printf '[ccg gate] ERROR: could not create workdir\n' >&2
+    return 2
+  fi
+
+  local diff_file="$workdir/diff.txt"
+  local risk_file="$workdir/risk.txt"
+  local codex_result="$workdir/codex.result"
+  local gemini_result="$workdir/gemini.result"
+  local codex_prompt="$workdir/codex.prompt"
+  local gemini_prompt="$workdir/gemini.prompt"
+  local synthesis_file="$workdir/synthesis.txt"
+
+  # Capture diff
+  local diff_out
+  diff_out=$(ccg_diff_capture "$diff_file")
+  if printf '%s\n' "$diff_out" | grep -q '^CCG_DIFF_FAIL='; then
+    printf '[ccg gate] %s\n' "$diff_out" >&2
+    ccg_cleanup "$workdir" >/dev/null
+    return 2
+  fi
+
+  # Risk score → mode
+  local risk_out
+  risk_out=$(ccg_risk_score "$diff_file")
+  printf '%s\n' "$risk_out" > "$risk_file"
+  local mode
+  mode=$(printf '%s\n' "$risk_out" | grep '^CCG_RISK_MODE=' | cut -d= -f2-)
+  CCG_MODE="${mode:-balanced}"
+  export CCG_MODE
+
+  # Build minimal review prompt (reuse diff as prompt body)
+  local prompt_body
+  prompt_body="Review this diff for correctness, security, and logic issues. End your response with exactly one of: VERDICT: merge | VERDICT: fix-required | VERDICT: discuss
+
+$(cat "$diff_file")"
+
+  printf '%s\n' "$prompt_body" > "$codex_prompt"
+  printf '%s\n' "$prompt_body" > "$gemini_prompt"
+
+  # Run Codex + Gemini in parallel
+  ccg_codex "$codex_prompt" "$codex_result" >/dev/null 2>&1 &
+  local codex_pid=$!
+  ccg_gemini "$gemini_prompt" "$gemini_result" >/dev/null 2>&1 &
+  local gemini_pid=$!
+  wait "$codex_pid" 2>/dev/null || true
+  wait "$gemini_pid" 2>/dev/null || true
+
+  # Extract verdict from results (fix-required wins over discuss wins over merge)
+  local verdict="merge"
+  local f
+  for f in "$codex_result" "$gemini_result"; do
+    [ -s "$f" ] || continue
+    if grep -qiE 'VERDICT:[[:space:]]*fix-required' "$f" 2>/dev/null; then
+      verdict="fix-required"; break
+    fi
+    if grep -qiE 'VERDICT:[[:space:]]*discuss' "$f" 2>/dev/null; then
+      verdict="discuss"
+    fi
+  done
+
+  # Write synthesis stub so ledger_record has something to store
+  printf 'gate verdict: %s\n' "$verdict" > "$synthesis_file"
+  ccg_ledger_record "$workdir" >/dev/null 2>&1 || true
+  ccg_persist_report "$workdir" >/dev/null 2>&1 || true
+  ccg_cleanup "$workdir" >/dev/null
+
+  case "$verdict" in
+    merge)
+      printf '[ccg gate] VERDICT: merge — commit allowed\n' >&2
+      return 0
+      ;;
+    fix-required)
+      printf '[ccg gate] VERDICT: fix-required — commit BLOCKED. Fix issues before committing.\n' >&2
+      return 1
+      ;;
+    discuss)
+      if [ "${CCG_GATE_DISCUSS:-allow}" = "block" ]; then
+        printf '[ccg gate] VERDICT: discuss — commit BLOCKED (CCG_GATE_DISCUSS=block).\n' >&2
+        return 1
+      fi
+      printf '[ccg gate] VERDICT: discuss — commit allowed (set CCG_GATE_DISCUSS=block to block).\n' >&2
+      return 0
+      ;;
+  esac
+}
+
+# ============================================================
+# Public: ccg_autocommit [message]
+#
+# Review current changes, then auto-commit if verdict=merge.
+# Designed for Claude Code CLI: AI writes code → /ccg autocommit
+#
+# Environment:
+#   CCG_GATE_DISCUSS=block|allow  — treat "discuss" as block (default: allow=commit)
+#   CCG_GATE_OFFLINE=1            — skip review, commit immediately
+#   CCG_AUTOCOMMIT_DRY_RUN=1     — review but do NOT commit (preview only)
+# ============================================================
+ccg_autocommit() {
+  local msg="${1:-}"
+
+  # Run review gate first
+  if ! ccg_precommit_gate; then
+    return 1
+  fi
+
+  if [ "${CCG_AUTOCOMMIT_DRY_RUN:-0}" = "1" ]; then
+    printf '[ccg autocommit] dry-run — skipping actual commit\n' >&2
+    return 0
+  fi
+
+  local vcs
+  vcs=$(_ccg_vcs_detect)
+
+  # Default commit message
+  if [ -z "$msg" ]; then
+    local ts
+    ts=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+    msg="chore: auto-commit via ccg [${ts}]"
+  fi
+
+  case "$vcs" in
+    git)
+      git add -A
+      git commit -m "$msg"
+      printf '[ccg autocommit] git commit done\n' >&2
+      ;;
+    svn)
+      svn commit -m "$msg"
+      printf '[ccg autocommit] svn commit done\n' >&2
+      ;;
+    *)
+      printf '[ccg autocommit] ERROR: not in a git or svn repo\n' >&2
+      return 2
+      ;;
+  esac
+}
+
+# ============================================================
+# Public: ccg_install_hook / ccg_uninstall_hook
+#
+# Install ccg_precommit_gate as a pre-commit hook for git or svn.
+# For SVN, writes a client-side pre-commit-hook script; the user
+# must register it in TortoiseSVN Settings → Hook Scripts.
+# ============================================================
+ccg_install_hook() {
+  local vcs
+  vcs=$(_ccg_vcs_detect)
+  local script_path
+  script_path="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")"
+
+  case "$vcs" in
+    git)
+      local hook_dir
+      hook_dir="$(git rev-parse --git-dir 2>/dev/null)/hooks"
+      local hook_file="$hook_dir/pre-commit"
+      if [ -f "$hook_file" ] && ! grep -q 'ccg_precommit_gate' "$hook_file" 2>/dev/null; then
+        cp "$hook_file" "${hook_file}.backup"
+        printf 'CCG_HOOK_BACKUP=%s.backup\n' "$hook_file"
+      fi
+      cat > "$hook_file" <<HOOK
+#!/usr/bin/env bash
+# ccg pre-commit gate — installed by ccg_install_hook
+CCG_SCRIPT="${script_path}"
+if [ -f "\$CCG_SCRIPT" ]; then
+  # shellcheck source=/dev/null
+  source "\$CCG_SCRIPT"
+  ccg_precommit_gate || exit 1
+fi
+HOOK
+      chmod +x "$hook_file"
+      printf 'CCG_HOOK_INSTALLED=git:%s\n' "$hook_file"
+      ;;
+    svn)
+      local wc_root
+      wc_root=$(_ccg_vcs_root)
+      local hook_file="$wc_root/.ccg-precommit-hook.sh"
+      cat > "$hook_file" <<HOOK
+#!/usr/bin/env bash
+# ccg SVN pre-commit hook — register in TortoiseSVN Settings → Hook Scripts
+# Hook type: pre_commit_hook  Working Copy Path: ${wc_root}
+# Command: bash "${hook_file}"
+CCG_SCRIPT="${script_path}"
+if [ -f "\$CCG_SCRIPT" ]; then
+  # shellcheck source=/dev/null
+  source "\$CCG_SCRIPT"
+  ccg_precommit_gate || exit 1
+fi
+HOOK
+      chmod +x "$hook_file"
+      printf 'CCG_HOOK_INSTALLED=svn:%s\n' "$hook_file"
+      printf 'CCG_HOOK_SVN_NEXT=Register in TortoiseSVN Settings → Hook Scripts → pre_commit_hook\n'
+      printf 'CCG_HOOK_SVN_WC=%s\n' "$wc_root"
+      printf 'CCG_HOOK_SVN_CMD=bash "%s"\n' "$hook_file"
+      ;;
+    *)
+      printf 'CCG_HOOK_FAIL=not-a-vcs-repo\n'
+      return 2
+      ;;
+  esac
+}
+
+ccg_uninstall_hook() {
+  local vcs
+  vcs=$(_ccg_vcs_detect)
+  case "$vcs" in
+    git)
+      local hook_file
+      hook_file="$(git rev-parse --git-dir 2>/dev/null)/hooks/pre-commit"
+      if [ -f "${hook_file}.backup" ]; then
+        mv "${hook_file}.backup" "$hook_file"
+        printf 'CCG_HOOK_RESTORED=%s\n' "$hook_file"
+      elif [ -f "$hook_file" ] && grep -q 'ccg_precommit_gate' "$hook_file" 2>/dev/null; then
+        rm "$hook_file"
+        printf 'CCG_HOOK_REMOVED=%s\n' "$hook_file"
+      else
+        printf 'CCG_HOOK_NOOP=no ccg hook found\n'
+      fi
+      ;;
+    svn)
+      local wc_root hook_file
+      wc_root=$(_ccg_vcs_root)
+      hook_file="$wc_root/.ccg-precommit-hook.sh"
+      if [ -f "$hook_file" ]; then
+        rm "$hook_file"
+        printf 'CCG_HOOK_REMOVED=%s\n' "$hook_file"
+      else
+        printf 'CCG_HOOK_NOOP=no ccg hook found\n'
+      fi
+      ;;
+    *)
+      printf 'CCG_HOOK_FAIL=not-a-vcs-repo\n'; return 2 ;;
+  esac
+}
+
+# ============================================================
 # Dispatch guard: only when executed (not sourced).
 # ============================================================
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then
   if [ "$#" -ge 1 ]; then
     cmd="$1"; shift
     case "$cmd" in
-      init|preflight|codex|gemini|cleanup|actual|usage|diff_capture|risk_score|ledger_record|ledger_query|ledger_context|persist_report)
+      init|preflight|codex|gemini|cleanup|actual|usage|diff_capture|risk_score|\
+ledger_record|ledger_query|ledger_context|persist_report|\
+precommit_gate|autocommit|install_hook|uninstall_hook)
         "ccg_$cmd" "$@"
         ;;
       *)

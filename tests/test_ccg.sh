@@ -604,7 +604,7 @@ tmpd=$(mktemp -d)
 ( cd "$tmpd" && _ccg_run_with_timeout 5 bash -c 'cd '"$tmpd"' && exit' ) || true
 r=$(cd "$tmpd" && ccg_diff_capture "$tmpd/d.txt" 2>&1)
 rm -rf "$tmpd"
-assert_match "$r" "CCG_DIFF_FAIL=not-a-git-repo"
+assert_match "$r" "CCG_DIFF_FAIL=not-a-vcs-repo"
 
 t_start "12.16 ccg_diff_capture captures a real diff"
 fresh_source
@@ -905,7 +905,7 @@ t_start "14.4 persist_report skips when not in git repo and no override"
 fresh_source
 wd=$(_setup_persist_workdir); nongit=$(mktemp -d)
 out=$(cd "$nongit" && unset CCG_REPORT_DIR; ccg_persist_report "$wd" 2>&1)
-assert_match "$out" "CCG_REPORT_SKIPPED=not-a-git-repo"
+assert_match "$out" "CCG_REPORT_SKIPPED=not-a-vcs-repo"
 rm -rf "$wd" "$nongit"
 
 t_start "14.5 persist_report uses CCG_REPORT_DIR override even outside git"

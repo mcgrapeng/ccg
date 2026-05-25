@@ -244,13 +244,43 @@ ccg is purpose-built for high-judgment code reviews. It's *not* a replacement fo
 
 - **Static analysis** — pair it with Semgrep / CodeQL, don't use it instead
 - **Linters or formatters** — those catch style; ccg catches architecture
-- **Automated gating** — ccg is a triage tool, not a bot (don't auto-run on every PR)
 - **Streaming dialogue** — ccg is one-shot; for multi-turn conversation use the Codex / Gemini CLIs directly
 - **IDEs other than Claude Code** — try [zen-mcp-server](https://github.com/BeehiveInnovations/zen-mcp-server) for VS Code / JetBrains
 
+## SVN support (experimental)
+
+ccg works with SVN 1.7+ working copies, including TortoiseSVN 1.10.
+
+```bash
+# In your SVN working copy:
+source /path/to/ccg.sh
+ccg_install_hook   # writes .ccg-precommit-hook.sh + prints TortoiseSVN config string
+```
+
+`svn diff --git` produces standard unified diff format, so all ccg layers (risk scoring, ledger, history) work without modification. SVN revision numbers are stored as `r<N>` in place of git SHAs.
+
+See [docs/SVN.md](docs/SVN.md) for TortoiseSVN setup, Windows `.bat` wrapper, and offline fallback.
+
+## Commit gate (pre-commit hook)
+
+Block commits when ccg verdict is `fix-required`:
+
+```bash
+source /path/to/ccg.sh
+ccg_install_hook   # git: writes .git/hooks/pre-commit  |  svn: writes .ccg-precommit-hook.sh
+```
+
+| Verdict | Default | Override |
+|---|---|---|
+| `merge` | allow | — |
+| `fix-required` | **block** | — |
+| `discuss` | allow | `CCG_GATE_DISCUSS=block` |
+
+Set `CCG_GATE_OFFLINE=1` to skip the LLM review when offline.
+
 ## Architecture & contributing
 
-ccg is **7 layers**, only the top one is "divergence detection". The other six (cache, ledger, usage, risk routing, smart diff, safe CLI scheduling) each independently solve a real problem. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before changing anything in `ccg.sh`.
+ccg is **8 layers** (L0–L7), only the top one is "divergence detection". Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before changing anything in `ccg.sh`.
 
 Tests:
 

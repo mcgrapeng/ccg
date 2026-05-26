@@ -96,6 +96,31 @@ npx @mcgrapeng/ccg doctor      # 检查 Codex / Gemini / API key
 npx @mcgrapeng/ccg about       # 看 7 层能力 + 当前环境状态
 ```
 
+## 命令速查
+
+| 命令 | 做什么 |
+|---|---|
+| `/ccg` | 对当前 git diff 做双 AI review，输出分歧报告 |
+| `/ccg ship` | staged → AI review → commit → merge 到默认分支（一键交付） |
+| `/ccg ship main` | 同上，指定 merge 目标为 main |
+| `/ccg ship main "feat: xxx"` | 同上，指定 commit message |
+| `/ccg merge main` | 把当前分支 AI 辅助合并到 main（不含 commit 步骤） |
+| `/ccg autocommit` | AI review staged 改动，通过后自动 commit |
+| `/ccg autocommit "feat: xxx"` | 同上，指定 commit message |
+| `/ccg gate` | 手动触发 pre-commit 审查（`ccg_install_hook` 后每次 commit 自动调用） |
+
+常用 bash 函数（在 Claude Code 外使用）：
+
+```bash
+source ~/.claude/commands/ccg.sh
+
+ccg_install_hook          # 安装 git pre-commit hook，之后每次 commit 自动 review
+ccg_uninstall_hook        # 卸载 hook
+ccg_usage --this-month    # 查本月 AI 调用费用
+ccg_ledger_query          # 查最近 5 条评审记录
+ccg_ledger_query "src/auth.ts"  # 查某文件的历史评审
+```
+
 ## 分歧示例（ccg 抓住的常见模式）
 
 分歧发生在各个领域，不只是安全。看看不同领域的分歧是什么样子的：

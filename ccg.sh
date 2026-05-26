@@ -2526,6 +2526,63 @@ EOF
 }
 
 # ============================================================
+# Public: ccg_ship [target-branch] [commit-message]
+#
+# One-shot: review staged changes → commit if approved → merge into target.
+# Combines ccg_autocommit + ccg_merge in sequence.
+#
+# Usage:
+#   ccg_ship                        # commit staged + merge into main/master/develop
+#   ccg_ship main                   # commit staged + merge into main
+#   ccg_ship main "feat: my change" # with explicit commit message
+#
+# Environment:
+#   CCG_GATE_OFFLINE=1   — skip LLM review, commit immediately
+#   CCG_MERGE_DRY_RUN=1  — merge dry-run (no commit on merge step)
+#   CCG_MERGE_NO_FETCH=1 — skip fetch before merge
+# ============================================================
+ccg_ship() {
+  local target_branch="${1:-}"
+  local commit_msg="${2:-}"
+
+  if ! command -v git >/dev/null 2>&1 || ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf 'CCG_SHIP_FAIL=not-a-git-repo\n' >&2; return 2
+  fi
+
+  if ! git symbolic-ref --quiet HEAD >/dev/null 2>&1; then
+    printf 'CCG_SHIP_FAIL=detached-head\n' >&2; return 2
+  fi
+
+  local source_branch
+  source_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+
+  # ── Step 1: autocommit staged changes ───────────────────
+  if ! git diff --cached --quiet 2>/dev/null; then
+    printf 'CCG_SHIP_STEP=autocommit\n'
+    local ac_ec=0
+    ccg_autocommit "$commit_msg" || ac_ec=$?
+    if [ "$ac_ec" -ne 0 ]; then
+      printf 'CCG_SHIP_FAIL=autocommit-blocked (exit=%d)\n' "$ac_ec" >&2
+      return 1
+    fi
+    printf 'CCG_SHIP_COMMITTED=1\n'
+  else
+    printf 'CCG_SHIP_COMMITTED=0 (nothing staged, skipping autocommit)\n'
+  fi
+
+  # ── Step 2: merge current branch into target ────────────
+  printf 'CCG_SHIP_STEP=merge\n'
+  local merge_ec=0
+  ccg_merge "$target_branch" || merge_ec=$?
+  if [ "$merge_ec" -ne 0 ]; then
+    printf 'CCG_SHIP_FAIL=merge-blocked (exit=%d)\n' "$merge_ec" >&2
+    return "$merge_ec"
+  fi
+
+  printf 'CCG_SHIP_DONE=1\n'
+}
+
+# ============================================================
 # Dispatch guard: only when executed (not sourced).
 # ============================================================
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -2534,7 +2591,7 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then
     case "$cmd" in
       init|preflight|codex|gemini|cleanup|actual|usage|diff_capture|risk_score|\
 ledger_record|ledger_query|ledger_context|persist_report|\
-precommit_gate|autocommit|install_hook|uninstall_hook|merge)
+precommit_gate|autocommit|install_hook|uninstall_hook|merge|ship)
         "ccg_$cmd" "$@"
         ;;
       *)

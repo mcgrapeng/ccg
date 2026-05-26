@@ -309,6 +309,64 @@ ccg_ledger_query                                # 最近 5 条评审
 ccg_ledger_query "src/auth.ts"                  # 这个文件历史评审过几次
 ```
 
+## /ccg ship — 一键交付（review → commit → merge）
+
+**语义**：`/ccg ship [target-branch] [commit-message]` = 把当前分支的 staged 改动 review 后提交，再合并到 target。
+
+| 命令 | 含义 |
+|---|---|
+| `/ccg ship` | staged → autocommit → merge 到默认保护分支 |
+| `/ccg ship main` | staged → autocommit → merge 到 main |
+| `/ccg ship main "feat: login"` | 同上，指定 commit message |
+
+**执行协议（Claude 必须严格按以下步骤）：**
+
+### 步骤 S.1 调用 ccg_ship
+
+```bash
+source ~/.claude/commands/ccg.sh
+ccg_ship "<target-branch>" "<commit-message>"
+```
+
+helper 内部自动：
+1. 若有 staged 改动 → 调 `ccg_autocommit`（AI review → 通过才 commit）
+2. 若无 staged 改动 → 跳过 commit，直接进入 merge
+3. 调 `ccg_merge <target>` → AI 辅助合并，冲突自动解决
+
+### 步骤 S.2 解读输出
+
+| 输出 | 含义 |
+|---|---|
+| `CCG_SHIP_COMMITTED=1` | staged 改动已通过 review 并 commit |
+| `CCG_SHIP_COMMITTED=0` | 没有 staged 改动，跳过 commit |
+| `CCG_SHIP_DONE=1` | 全流程完成 |
+| `CCG_SHIP_FAIL=autocommit-blocked` | review 不通过，commit 被阻断，merge 未执行 |
+| `CCG_SHIP_FAIL=merge-blocked` | commit 成功但 merge 失败（冲突需人工处理） |
+
+### 步骤 S.3 输出格式
+
+```
+## 🚀 CCG Ship 结果
+
+**分支**：`<source>` → `<target>`
+
+**Step 1 — Commit**：✅ 已提交 / ⏭️ 无 staged 改动（跳过）/ ❌ review 不通过（已阻断）
+
+**Step 2 — Merge**：✅ 合并完成 / ⚠️ 需人工处理冲突 / ❌ 失败
+
+<如果 merge 有冲突，原样转发 ccg_merge 的冲突报告表格>
+```
+
+### 环境变量
+
+| 变量 | 说明 |
+|---|---|
+| `CCG_GATE_OFFLINE=1` | 跳过 AI review，直接 commit |
+| `CCG_MERGE_DRY_RUN=1` | merge 演练，不实际提交 |
+| `CCG_MERGE_NO_FETCH=1` | 跳过 fetch（离线环境） |
+
+---
+
 ## /ccg merge — AI 辅助合并（用户主动触发）
 
 **语义**：`/ccg merge [target-branch]` = **把当前分支合并到 target**。

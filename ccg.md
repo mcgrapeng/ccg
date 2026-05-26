@@ -309,6 +309,99 @@ ccg_ledger_query                                # 最近 5 条评审
 ccg_ledger_query "src/auth.ts"                  # 这个文件历史评审过几次
 ```
 
+## /ccg merge — AI 辅助合并（用户主动触发）
+
+**语义**：`/ccg merge [target-branch]` = **把当前分支合并到 target**。
+
+| 命令 | 含义 |
+|---|---|
+| `/ccg merge` | 站在 `feature` 上，合并到默认保护分支（main → master → develop 顺序） |
+| `/ccg merge develop` | 站在 `feature` 上，合并到 `develop` |
+| `/ccg merge feature` 站在 `main` 上 | ❌ 报 same-branch（请先 checkout feature 再用） |
+
+> **重要**：参数是"合并到哪"，不是"合并什么"。你的当前分支永远是 source。
+
+**执行协议（Claude 必须严格按以下步骤）：**
+
+### 步骤 M.0 安全前置
+
+调用前**强制确认**：
+- 当前分支(source) = `git rev-parse --abbrev-ref HEAD`
+- 工作区是否干净？
+- 目标分支是否存在？（helper 内部会校验，但 Claude 必须在 prompt 里告知用户即将合并的是 `<current> → <target>`）
+
+### 步骤 M.1 调用 ccg_merge
+
+```bash
+source ~/.claude/commands/ccg.sh
+ccg_merge "<target-branch>"          # 不传参数则默认 main/master/develop
+```
+
+helper 内部自动：
+1. 校验工作区干净（脏则 `CCG_MERGE_FAIL=dirty-working-tree` 退出）
+2. **备份 target 分支**（受影响的那一方）到 `ccg-backup/<target>-<timestamp>`
+3. `git checkout <target>` — 切到 target 让 merge commit 落在那
+4. `git merge --no-commit --no-ff <source>` — 把当前分支合并进 target
+5. 无冲突 → 直接 commit + 输出 `CCG_MERGE_RESULT=clean`
+6. 有冲突 → 解析所有冲突块 → 并行调 Codex+Gemini 决策每个冲突
+7. AI 给 `NEEDS_HUMAN_DECISION` 的冲突 → 不 commit，**留在 target 分支上**供人审
+
+### 步骤 M.2 解读 helper 输出
+
+| 输出 | 含义 | 给用户怎么说 |
+|---|---|---|
+| `CCG_MERGE_SOURCE=<x>` + `CCG_MERGE_TARGET=<y>` | 标识本次方向 | 一定要明确告诉用户：source → target |
+| `CCG_MERGE_RESULT=clean` + `CCG_MERGE_COMMITTED=1` | 合并完成、无冲突 | "✅ `<source>` 已合并到 `<target>`，你现在在 `<target>` 分支" |
+| `CCG_MERGE_RESULT=conflicts` + `CCG_MERGE_COMMITTED=1` | 有冲突，AI 解决了，已 commit | 展示冲突报告表格（helper 已输出） |
+| `CCG_MERGE_BLOCKED=needs-human` | 部分冲突 AI 不敢决策，**未 commit** | "你在 `<target>` 分支（未 commit 的 merge 状态）。请审查 `<files>`，确认后 `git commit`，或 `git merge --abort && git checkout <source>` 撤销" |
+| `CCG_MERGE_FAIL=dirty-working-tree` | 工作区脏 | "请先 `git commit` 或 `git stash` 当前改动" |
+| `CCG_MERGE_FAIL=same-branch` | 当前已经在 target 上 | "你已经在 `<target>` 分支上。请先 `git checkout <feature>` 再合并" |
+| `CCG_MERGE_FAIL=target-not-found:<x>` | target 分支不存在 | "目标分支 `<x>` 不存在。本地分支：`git branch`，远程：`git branch -r`" |
+| `CCG_MERGE_FAIL=no-target-branch` | 找不到默认保护分支 | "请显式指定目标分支：`/ccg merge <branch>`" |
+
+### 步骤 M.3 输出可视化合并报告（**严格按此格式**）
+
+helper 已经在 stdout 输出了 Markdown 表格，Claude **必须原样转发**给用户，并在表格前后加摘要：
+
+````
+## 🔀 CCG Merge 报告
+
+**Source**：`<source_branch>`（你的工作分支）
+**Target**：`<target_branch>`（被合并到，已自动切到此分支）
+**Backup**：`ccg-backup/<target>-<ts>`（target 合并前的快照，后悔时可恢复）
+
+<helper 输出的 OURS/THEIRS 表格原样贴在这里>
+
+> 表格中：OURS = target 分支原内容，THEIRS = 你的 feature 改动
+
+═══ 决策摘要 ═══
+- ✅ AI 解决：N 处
+- ⚠️ 需人审：M 处（如有，列出 file:idx）
+
+═══ 你现在在哪 ═══
+- 如果 CCG_MERGE_COMMITTED=1：你已切到 `<target>`，合并已完成，可以 `git push origin <target>`
+- 如果 CCG_MERGE_BLOCKED：你在 `<target>` 但 merge 未 commit，请审查冲突文件
+
+═══ 撤销方法 ═══
+- 撤销已 commit 的合并：`git reset --hard ccg-backup/<target>-<ts>`
+- 撤销未 commit 的合并：`git merge --abort && git checkout <source>`
+````
+
+### 关键纪律
+
+1. **永远不要弄混 source/target**：source 是用户的工作分支（current），target 是要合并到的地方（参数/默认）
+2. **OURS = target**：因为 git checkout target 后，target 的内容就是 ours
+3. **NEEDS_HUMAN_DECISION 不要替用户决策**：明确告诉用户"AI 不敢决，请你看"
+4. **保留双方代码**：AI 默认行为是合并双方逻辑，绝不静默丢弃任何一方
+5. **可视化优先**：表格比一段一段叙述清楚 10 倍
+
+### 环境变量
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `CCG_MERGE_DRY_RUN` | `0` | `1` = 跑全流程但不 commit（预览模式，结束时切回 source） |
+| `CCG_MERGE_NO_AI` | `0` | `1` = 跳过 AI 解决，保留冲突标记给人手工解 |
+
 ## 故障排除
 
 | 症状 | 原因 | 解决 |

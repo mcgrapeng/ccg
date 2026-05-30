@@ -1,296 +1,597 @@
-# ccg — Code Divergence Detector
+# CCG — Code Divergence Detector
 
-> Surface where Codex and Gemini disagree on your code — that's where you need to make a call.
-> 
-> A Claude Code slash command. Install once, type `/ccg` on a diff.
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Bash](https://img.shields.io/badge/Shell-Bash%203.2%2B-green.svg)]()
+[![Models](https://img.shields.io/badge/Models-27%2B-purple.svg)]()
 
-[![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)]()
-[![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
-[![npm downloads](https://img.shields.io/npm/dm/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
-[![GitHub stars](https://img.shields.io/github/stars/mcgrapeng/ccg.svg?style=social&label=Star)](https://github.com/mcgrapeng/ccg/stargazers)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+> **Identity**: Not a review tool — a **divergence detector**.
+> Two independent model families review the same diff in parallel.
+> When they **agree**, signal is low. When they **disagree**, that's where humans should focus.
 
-**English** ｜ [简体中文](README.zh-CN.md) ｜ [日本語](README.ja.md) ｜ [한국어](README.ko.md)　·　[Architecture →](docs/ARCHITECTURE.md)
+CCG (Code Convergence/divergence Guardian) is a multi-model code review and merge automation system. Single-command workflow from review to push, with AI-powered conflict resolution as its core competitive advantage.
+
+**Other languages**: [简体中文](docs/README.zh-CN.md) · [日本語](docs/README.ja.md) · [한국어](docs/README.ko.md)
 
 ---
 
-## What is ccg
+## Table of Contents
 
-You're about to merge a change to `auth/login.go`. You want a sanity check. Today you have three options, all of them flawed:
+- [Why CCG](#why-ccg)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [The 4 Stages](#the-4-stages)
+- [Model Strategy](#model-strategy)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Documentation](#documentation)
 
-- **Single-model review** (Copilot, Cursor `/review`, Aider) gives you **one perspective**. If Claude misses a timing attack, you miss it too.
-- **Multi-model gateways** (zen-mcp-server etc.) **average opinions**, hiding exactly the places where smart models disagreed — which is the only place you actually needed help.
-- **Manual cross-checking** is what you'd do if you had unlimited time. You don't.
+---
 
-ccg is a `/ccg` slash command for Claude Code that fixes all three. On any diff, it:
+## Why CCG
 
-1. Sends the same prompt to **Codex (OpenAI)** and **Gemini (Google)** in parallel
-2. Has **Claude** read both reports and surface **specifically where they disagree** — that's where human judgment is needed
-3. Tracks cost, picks the cheapest model good enough for the risk level, and remembers past reviews
-
-**Think of it like:** asking two senior engineers from different teams to review the same PR, then having a tech lead synthesize: "they agree on these issues, they disagree on this one — you decide, and here's my read."
-
-## What ccg does (5 core capabilities)
-
-1. **Parallel reviews** — same prompt to Codex + Gemini simultaneously
-2. **Divergence detection** — Claude surfaces where they disagree (not where they agree)
-3. **Risk-aware routing** — auto-scores your diff, picks cost / balanced / quality mode
-4. **Cost tracking** — logs every call; 24h cache makes repeat reviews free ($0.00)
-5. **Review memory** — saves past reviews; next review auto-injects history so recurring patterns surface instead of decaying between sessions
-
-## When to use ccg
-
-The trigger isn't a *domain* — it's a *feeling*. Use ccg when, looking at your own diff, you catch yourself thinking:
-
-| Inner monologue | Use ccg? |
+| Problem | CCG's Answer |
 |---|---|
-| "If I get this wrong, I'll get paged at 3am." | ✅ Yes |
-| "This is a judgment call — no obviously right answer." | ✅ Yes |
-| "I wish someone else would look at this first." | ✅ Yes |
-| "I just renamed a variable." | ❌ No |
-| "Docs-only change." | ❌ No |
-| "I want streaming chat with one model." | ❌ No (use the CLI directly) |
+| Single-model review has blind spots | Two independent model families review in parallel — surface where they **disagree** |
+| One-size-fits-all model wastes money / quality | Risk-aware auto-routing: cheap for low-risk, premium for critical |
+| Merge conflicts are tedious and error-prone | **AI conflict resolution with Bailian as primary** — multiple safety guards, never silently drops code |
+| Push decisions lack context | Stage 4 produces a **graphical quality scorecard** before push |
+| Reviews aren't reusable | JSONL ledger captures every review, queryable by path |
 
-**Examples across domains** — none of these are auth/crypto, all of them are real "two senior engineers would disagree" moments:
+---
 
-- **Social platforms** — re-ranking the feed with a new engagement signal · comment-thread fan-out strategy · A/B test bucketing logic · anti-abuse rate-limit policy · graph-DB schema for follow relationships
-- **Data / AI infra** — switching embedding model (do you re-index?) · changing chunking strategy · RAG retrieval scoring · prompt-injection defense layering
-- **Frontend** — SSR vs ISR vs RSC for a new page · cache invalidation strategy · state-management refactor · accessibility trade-offs
-- **API design** — cursor vs offset pagination · error response model · versioning approach · idempotency-key handling
-- **Distributed systems** — timeout/retry policy · cache TTL vs event-driven invalidation · partition tolerance trade-off · leader-election semantics
-- **Database** — multi-step migration sequencing · index choice on a hot path · transaction isolation level · soft-delete vs hard-delete
-- **Security** — yes, auth / crypto / payments too — but just one of many domains
-
-**The pattern:** any change where a reasonable engineer might pick option A and another reasonable engineer might pick option B. That's when divergence detection earns its $0.04.
-
-## Why ccg (vs everything else)
-
-**1. Disagreement is the signal, not the noise.**
-When Codex says "use `subtle.ConstantTimeCompare`" and Gemini says "bcrypt is already constant-time, that's cargo-cult", *that* is where you need to think. Other tools blend these into a vague "consider timing attacks". ccg shows you the conflict verbatim.
-
-**2. Cost telemetry built in.**
-Codex/Gemini CLIs don't tell you what you spent. ccg logs every call, picks the cheapest sufficient model automatically (risk-aware routing), and caches identical prompts for 24h at zero cost. Typical spend: $0.02–0.15 per meaningful divergence review — a single senior code review costs $200–300 in time. Divergence detection earns its cost on the first contentious PR. Check accumulated spend anytime with `ccg_usage --this-month`.
-
-**3. A review history that survives across sessions — *and feeds the next review*.**
-"What did the model say about `src/auth.ts` two weeks ago?" — ccg's append-only ledger answers that. No stateless tool can. As of v3.2, prior reviews touching the same files are auto-injected into the next prompt. Recurring patterns surface instead of decaying. Unresolved `fix-required` items don't get lost between sessions.
-
-## Install
-
-One-liner (no Node required):
+## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mcgrapeng/ccg/main/scripts/curl-install.sh | bash
+# Clone & install
+git clone https://github.com/your-org/ccg.git
+cd ccg
+ln -s "$(pwd)/ccg" /usr/local/bin/ccg
+
+# Verify
+ccg config
+ccg models
 ```
 
-Then install the AI CLIs (one-time):
+**Requirements:**
+- `bash 3.2+`, `git`, `curl`, `jq`
+- At least one of: `codex` CLI, `gemini` CLI, `ANTHROPIC_API_KEY`, or `BAILIAN_API_KEY`
+
+**Custom API endpoints (third-party proxies supported):**
+- `CCG_CODEX_BASE_URL` / `OPENAI_BASE_URL` — Codex / OpenAI proxy
+- `CCG_CLAUDE_BASE_URL` / `ANTHROPIC_BASE_URL` — Claude / Anthropic proxy
+- `CCG_GEMINI_BASE_URL` / `GEMINI_BASE_URL` — Gemini proxy
+- `CCG_BAILIAN_BASE_URL` — Bailian proxy
+
+---
+
+## Quick Start
 
 ```bash
-npm i -g @openai/codex @google/gemini-cli
-echo 'export GEMINI_API_KEY="<your-key>"' >> ~/.zshenv
+# 1. Review your current changes
+ccg review
+
+# 2. Auto-commit if review gate passes
+ccg commit "feat: add user auth"
+
+# 3. Merge with AI conflict resolution
+ccg merge main
+
+# 4. Pre-push graphical analysis & decision
+ccg push origin main
+
+# Helper commands
+ccg config           # Show current configuration
+ccg models           # List all available models
 ```
 
-Verify:
+### Skip Review Mode
+
+For trivial changes (docs, typos) you can disable Stage 1 entirely:
 
 ```bash
-npx @mcgrapeng/ccg doctor      # check Codex / Gemini / API key
-npx @mcgrapeng/ccg about       # 7-layer capability probe + runtime state
+# Skip review — commit becomes the first stage
+export CCG_REVIEW=off
+
+ccg commit "docs: fix typo"   # Auto git add + commits (no LLM)
+ccg push origin main           # Push still works
+
+# Re-enable later
+unset CCG_REVIEW   # or: export CCG_REVIEW=on
 ```
 
-## Example divergences (the patterns ccg catches)
+The `CCG_REVIEW` switch accepts: `on` (default) / `off` / `0` / `false` / `disabled`.
 
-Disagreement happens everywhere, not just security. Here's what divergence looks like in different domains:
+---
 
-**Crypto/Security (classic)**
+## Complete Workflow
+
+### Default Flow (Review enabled)
+
 ```
-▸ auth/login.go:6 — bcrypt hash comparison
-  🔵 Codex: "Wrap with subtle.ConstantTimeCompare to prevent timing attacks"
-  🟢 Gemini: "bcrypt is already constant-time. Wrapping is cargo-cult"
-  ⚖️ Decision: You pick based on threat model
+┌───────────────────────────────────────────────────────────────────────┐
+│  Stage 1: ccg review                                  【3 LLM calls】 │
+│  ─────────────────────                                                │
+│   1. ccg_init           → mktemp workdir + paths                      │
+│   2. ccg_diff_capture   → 4-level fallback (worktree / staged / ...)  │
+│   3. ccg_risk_score     → Bailian LLM (fallback: rule engine)         │
+│   4. Auto-pick CCG_MODE (cost/balanced/quality) by risk               │
+│   5. Run any 2 providers in parallel (codex/gemini/bailian)           │
+│   6. ccg_synthesize     → Claude meta-review                          │
+│      → CLASSIFICATION: AGREEMENT / DIVERGENCE / BLINDSPOT             │
+│      → VERDICT: merge / fix-required / discuss                        │
+│   7. Persist state to <repo>/.git/ccg/last-review.json                │
+└───────────────────────────────────────────────────────────────────────┘
+                                  ↓
+┌───────────────────────────────────────────────────────────────────────┐
+│  Stage 2: ccg commit "msg"                            【0 LLM calls】 │
+│  ─────────────────────────                                            │
+│   1. git add -A               (auto-stage worktree; opt out via       │
+│                                CCG_NO_AUTO_ADD=1)                     │
+│   2. Read last-review.json    (refuses if missing)                    │
+│   3. Compare staged diff hash with reviewed hash                      │
+│      → mismatch? refuse and ask user to re-run 'ccg review'           │
+│   4. Apply verdict:                                                   │
+│      • merge        → ✅ commit                                       │
+│      • discuss      → ⚠️ commit (or block if CCG_GATE_DISCUSS=block)  │
+│      • fix-required → ❌ block                                        │
+│   5. git commit -m "msg"                                              │
+│   6. Delete state file (one-shot)                                     │
+└───────────────────────────────────────────────────────────────────────┘
+                                  ↓
+┌───────────────────────────────────────────────────────────────────────┐
+│  Stage 3: ccg merge <target>                       【on-demand LLM】 │
+│  ───────────────────────────                                          │
+│   1. Safety checks: clean tree, no detached HEAD, no mid-op           │
+│   2. git fetch + sync local target with origin                        │
+│   3. Create backup branch (ccg-backup/<target>-<ts>-<pid>-<rand>)     │
+│   4. git checkout target + git merge --no-commit feature              │
+│   5. For each conflict file:                                          │
+│      a. classify (content / binary / submodule / symlink / ...)       │
+│      b. parse <<<<<<< >>>>>>> blocks                                  │
+│      c. AI resolution (Bailian → Claude → Codex+Gemini)               │
+│      d. validate (no markdown fences, no conflict markers, non-empty) │
+│      e. atomic file rewrite (mktemp + mv, preserve perms)             │
+│      f. git add (only if resolved cleanly)                            │
+│   6. git commit (if all clean) OR leave uncommitted (if needs-human)  │
+│   7. Real-time progress: [3/12] src/auth.js ... ✅ resolved           │
+└───────────────────────────────────────────────────────────────────────┘
+                                  ↓
+┌───────────────────────────────────────────────────────────────────────┐
+│  Stage 4: ccg push <remote> <branch>                 【1 LLM call】  │
+│  ──────────────────────────────────                                   │
+│   1. Detect upstream + remote URL                                     │
+│   2. Compute commits ahead / behind                                   │
+│   3. List commits with quality markers (✓ conventional / ⚠ WIP)       │
+│   4. Categorize files (💻 code / 🧪 tests / 📖 docs / ⚙️ config)      │
+│   5. Detect sensitive files (.env / *.pem / credentials / ...)        │
+│   6. ccg_risk_score on the push diff (Bailian LLM)                    │
+│   7. Quality Scorecard (5 checks):                                    │
+│      • conventional commit messages                                   │
+│      • tests updated alongside code                                   │
+│      • no sensitive files                                             │
+│      • up to date with remote                                         │
+│      • risk level acceptable                                          │
+│   8. Recommendation: 🟢 READY / 🟡 CAUTION / 🔴 NOT RECOMMENDED       │
+│   9. Decision prompt: y/n/d (diff)/l (log)                            │
+│  10. git push (if y)                                                  │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
-**Frontend (cache strategy)**
+### Skip-Review Flow (`CCG_REVIEW=off`)
+
 ```
-▸ cache.ts:42 — invalidate on write or subscribe to events?
-  🔵 Codex: "Always revalidate on write (predictable, simpler)"
-  🟢 Gemini: "Event subscription scales better; write-revalidate causes cache storms"
-  ⚖️ Decision: You pick based on traffic patterns and SLA
+┌───────────────────────────────────────────────────────────────────────┐
+│  Stage 1: ccg review                                   【0 LLM calls】│
+│  → ℹ️  Review stage is DISABLED — no-op                              │
+└───────────────────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────────────┐
+│  Stage 2: ccg commit "msg"                             【0 LLM calls】│
+│  → 1. git add -A                                                      │
+│  → 2. ⚠️  Review stage DISABLED — committing without review           │
+│  → 3. git commit -m "msg"                                             │
+└───────────────────────────────────────────────────────────────────────┘
+                                  ↓
+            (Stage 3 / Stage 4 unchanged from default flow)
 ```
 
-**API Design (pagination)**
+---
+
+---
+
+## The 4 Stages
+
+CCG is built around four stages. Each has a specific purpose, model strategy, and safety guarantees.
+
+### Stage 1 — Code Review (`ccg review`)
+
+**Purpose**: Identify bugs, security issues, and quality problems in your diff.
+
+**Model strategy**:
+- Runs **any 2 models in parallel** from 3 providers: `codex`, `gemini`, `bailian`
+- **Default: `codex + gemini`** (two independent CLI-based providers)
+- **🚫 Claude is STRICTLY FORBIDDEN in Stage 1** — it is reserved exclusively for the Synthesis step where it serves as the meta-reviewer with an independent perspective
+- Models are selected by current `CCG_MODE` (see [Model Strategy](#model-strategy))
+
+**`CCG_PROVIDERS` syntax** (Stage 1 only — 3 allowed providers):
+```bash
+# Default — codex + gemini (CLI-based, independent)
+CCG_PROVIDERS="codex gemini"
+
+# Same provider, two different models — e.g., 2 Bailian models in parallel
+CCG_PROVIDERS="bailian:qwen-3.7 bailian:deepseek-v4"
+
+# Mix providers with explicit model overrides
+CCG_PROVIDERS="codex:gpt-5.5 gemini:gemini-3.5-flash"
+
+# Cost optimization — all domestic models
+CCG_PROVIDERS="bailian:kimi-k2.6 bailian:glm-5.1"
+
+# ❌ DO NOT do this — claude is rejected and ccg review will return error
+# CCG_PROVIDERS="claude codex"
 ```
-▸ pagination.go:18 — cursor vs offset pagination?
-  🔵 Codex: "Offset is simpler, users expect it"
-  🟢 Gemini: "Cursor is O(1), offset is O(n) on deletion; pick by growth rate"
-  ⚖️ Decision: You pick based on data churn and growth projections
+
+**Output**: Synthesis classified as one of:
+- `AGREEMENT` — both reviewers flag same issues (high confidence)
+- `DIVERGENCE` — reviewers contradict (needs human judgment)
+- `BLINDSPOT` — one missed issues the other caught (highest signal)
+
+**Pipeline**:
+```
+git diff → risk scoring → mode selection
+   → parallel: [Codex review + Bailian review]
+   → synthesize → AGREEMENT | DIVERGENCE | BLINDSPOT
 ```
 
-That disagreement is where ccg earns its cost. See a full-depth example below.
+**Safety guarantees**:
+- Prompt injection defense (untrusted-content markers, per-call nonce)
+- Diff size warning (>200KB may exceed context)
+- Cleanup trap (Ctrl+C kills child processes)
+- Partial-failure handling (1/2 success → continue with warning)
 
-## Try it — a complete walkthrough
+---
 
-Say you just edited `auth/login.go`:
+### Stage 2 — Auto Commit (`ccg commit`)
 
-```go
-// before                                            // after
-func Login(user, pw string) bool {                   func Login(user, pw string) bool {
-    u := lookupUser(user)                                u := lookupUser(user)
--   return u.Hash == sha256.Sum256([]byte(pw))           hashed, err := bcrypt.GenerateFromPassword([]byte(pw), 12)
-+                                                        if err != nil { return false }
-+                                                        return subtle.ConstantTimeCompare(u.Hash, hashed) == 1
+**Purpose**: Enforce that only reviewed code reaches git history — **without any extra LLM calls**.
+
+**Model strategy**: 🚫 **No LLM calls in Stage 2**. Reuses Stage 1's synthesis verdict.
+
+**How it works**:
+1. **Auto-stage worktree** with `git add -A` (opt out via `CCG_NO_AUTO_ADD=1`)
+2. Read state file from `<repo>/.git/ccg/last-review.json` (written by Stage 1)
+3. Verify the staged diff hash matches the reviewed hash
+4. Apply the recorded verdict (`merge` / `fix-required` / `discuss`)
+5. `git commit -m "msg"`
+6. Delete the state file (one-shot — next commit needs a fresh review)
+
+**State file contents**:
+```json
+{
+  "ts": "2026-05-29T11:30:00Z",
+  "diff_hash": "acb9adaab6516b3e7fc66fed10dd8a8d",
+  "diff_source": "worktree",
+  "verdict": "merge",
+  "classification": "AGREEMENT",
+  "mode": "balanced"
 }
 ```
 
-You open Claude Code and type:
+**Verdicts**:
+| Verdict | Action |
+|---|---|
+| `merge` | ✅ Commit allowed |
+| `discuss` | ⚠️ Allowed by default (set `CCG_GATE_DISCUSS=block` to enforce) |
+| `fix-required` | ❌ Commit blocked |
 
+**Failure modes**:
+| Scenario | Result |
+|---|---|
+| No prior review | ❌ Error: "Run 'ccg review' first" (or set `CCG_REVIEW=off` to skip) |
+| Diff changed since review | ❌ Hash mismatch — re-run review |
+| Bypass diff check | `CCG_COMMIT_FORCE=1 ccg commit ...` |
+| Auto-stage disabled | `CCG_NO_AUTO_ADD=1 ccg commit ...` — caller must `git add` first |
+| Review disabled | `CCG_REVIEW=off ccg commit ...` — skips state check entirely |
+
+**Why no LLM in Stage 2?**
+
+The original design ran 2 parallel models here for adversarial robustness — but `ccg review` already does that (2 models + Claude synthesis). Repeating it on commit doubles cost and latency without adding signal. Reusing Stage 1's verdict is faster, cheaper, and equally safe.
+
+---
+
+### Stage 3 — AI Merge (`ccg merge <target>`) ⭐ **Core Competitive Advantage**
+
+**Purpose**: Resolve merge conflicts professionally and reliably.
+
+**Model strategy** (3-tier fallback):
+1. **Bailian** (primary) — Aliyun-hosted models (most reliable for code)
+2. **Claude** (secondary) — direct Anthropic API
+3. **Codex + Gemini** (tertiary) — parallel race
+4. `NEEDS_HUMAN_DECISION` if all fail
+
+**Conflict classification** (only `content` goes to AI):
+| Kind | Handling |
+|---|---|
+| `content` | AI resolution |
+| `binary` | NEEDS HUMAN |
+| `submodule` | NEEDS HUMAN |
+| `symlink` | NEEDS HUMAN |
+| `delete_modify` | NEEDS HUMAN |
+| `both_deleted` | NEEDS HUMAN |
+| `added_one_side` | NEEDS HUMAN |
+| `both_added` | NEEDS HUMAN |
+
+**Pipeline**:
 ```
-/ccg
-```
-
-After ~30 seconds you see something like this — **real output**, not a placeholder:
-
-```
-📍 Scope: worktree · 1 file · +4 -1 lines
-🎯 Mode:  quality  (risk=65 · auth+35 size>0+5 crypto-mention+25)
-🩺 Both reviewers OK: Codex ✓ · Gemini ✓
-💰 Cost: $0.041
-
-═══ AGREEMENT (2) — both flagged, low signal ═══
-• auth/login.go:3 — sha256 wasn't a password hash; bcrypt is correct
-• auth/login.go:5 — handle the bcrypt error explicitly (you do)
-
-═══ DIVERGENCE (1) — the models disagreed ★ you decide ═══
-
-▸ auth/login.go:6 — how to compare bcrypt hashes
-  🔵 Codex:   "Wrap with subtle.ConstantTimeCompare to prevent timing attacks
-              even with bcrypt."
-  🟢 Gemini:  "bcrypt.CompareHashAndPassword is already constant-time. Wrapping
-              it is cargo-cult and can mask bugs (length mismatch panics)."
-  ⚖️ Claude:  Gemini is correct. bcrypt.CompareHashAndPassword is the canonical
-              comparison; ConstantTimeCompare on its raw output is a category
-              error — you'd be comparing the freshly-hashed `pw` against the
-              stored hash, but bcrypt salts each hash uniquely so direct
-              comparison ALWAYS returns false.
-  ➡️ Action:  Replace the ConstantTimeCompare line with:
-              `err := bcrypt.CompareHashAndPassword(u.Hash, []byte(pw))`
-              `return err == nil`
-
-═══ BLINDSPOT (1) — neither saw, Claude suspects ═══
-• Error path: returning `false` on bcrypt error is correct for the caller but
-  silently swallows infrastructure errors (e.g. bcrypt OOM). Log the error.
-
-═══ VERDICT: fix-required ═══
-The comparison logic as written will always reject valid passwords. Apply
-the DIVERGENCE action, add error logging, and you're good to merge.
-```
-
-### How to read this output
-
-| Section | What it means | What to do |
-|---|---|---|
-| **AGREEMENT** | Both Codex and Gemini flagged the same thing. Your single-source Claude likely catches these too — **low new information**. | Skim, fix if not already done. |
-| **DIVERGENCE** ★ | The two models disagreed. **This is the whole reason ccg exists.** Claude's "Action" line gives you a recommendation, but you're the final decider. | Read carefully. Apply Claude's call or override it. |
-| **BLINDSPOT** | Neither model raised it, but Claude noticed something while synthesizing. **Use sparingly** — limit 2 per run. | Treat as a hint, not gospel. |
-| **VERDICT** | `merge` / `fix-required` / `discuss`. One-line summary. | **Use as your merge gate.** |
-
-After the review, `ccg_ledger_record` writes one JSONL line to your ledger. Two weeks from now you can:
-
-```bash
-source ~/.claude/commands/ccg.sh
-ccg_ledger_query "auth/login.go"
-# → "auth/login.go: 3 reviews · last 2026-05-23 (fix-required) · 2026-05-09 (merge) · 2026-04-28 (discuss)"
-```
-
-The same review is also persisted as a self-contained markdown report at `.ccg/reports/<sha>_<utc-timestamp>.md` inside your repo. Useful when you close Claude Code and still want the full output — synthesis + raw Codex + raw Gemini — to be readable later without re-running. Set `CCG_NO_REPORT=1` to opt out, or `CCG_REPORT_DIR=<path>` to relocate. (Tip: add `.ccg/` to your `.gitignore` unless you want the reports tracked.)
-
-## Configure (defaults are usually fine)
-
-Mode and model picks are automatic. Override only when needed:
-
-```bash
-CCG_MODE=quality /ccg          # force quality models on any diff
-CCG_CODEX_MODEL=o3 /ccg        # override one model
-CCG_NO_CACHE=1 /ccg            # skip 24h cache for this call
+checkout target → backup branch → git merge --no-commit
+  ↓ (for each conflict file)
+  classify → parse <<<<<<< blocks
+  → Bailian resolution
+    ↓ (if failed)
+    Codex + Gemini parallel
+    ↓ (if both failed)
+    NEEDS_HUMAN_DECISION
+  → validate (no markdown fences, no conflict markers, non-empty)
+  → atomic file rewrite (mktemp + mv, preserve permissions)
+  → git add (if resolved)
+  ↓
+  commit (if all clean) | leave uncommitted (if any needs-human)
 ```
 
-Common knobs (full list in [Architecture → §5](docs/ARCHITECTURE.md#5-extension-points)):
+**Safety guarantees**:
+- Backup branch created BEFORE merge (`ccg-backup/<target>-<timestamp>-<pid>-<rand>`)
+- Aborts if working tree is dirty, detached HEAD, or mid-operation
+- Rejects diverged remote
+- Per-conflict nonce prevents OURS/THEIRS injection
+- Validates resolved content (no markdown fences, no conflict markers, non-empty)
+- Atomic file replacement (`mktemp` + `mv`)
+- Preserves file permissions and refuses to write through symlinks
+- **Never silently drops code** — fails to NEEDS_HUMAN
+- Real-time progress: `[3/12] src/auth.js ... ✅ resolved`
+- Limits max conflicts (default 50, override via `CCG_MERGE_MAX_CONFLICTS`)
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `CCG_MODE` | `auto` | `auto` / `cost` / `balanced` / `quality` |
-| `CCG_CACHE_TTL_HOURS` | `24` | Cache TTL |
-| `CCG_MAX_PROMPT_KB` | `100` | Per-call prompt size cap |
-| `CCG_NO_HISTORY` | `0` | Set to `1` to disable review history injection |
-| `CCG_HISTORY_MAX` | `3` | Max number of prior reviews to inject |
+---
 
-Cost reference (USD per call, after cache hit):
+### Stage 4 — Pre-Push Analysis (`ccg push <remote> <branch>`)
 
-| Mode | Codex | Gemini | Typical cost |
+**Purpose**: Show a comprehensive, graphical report before pushing — let user decide informed.
+
+**Model strategy**: Bailian LLM for risk scoring (falls back to deterministic rules).
+
+**Report sections**:
+```
+╔══════════════════════════════════════════════════════════╗
+║          🚀  CCG Pre-Push Analysis Report  🚀            ║
+╚══════════════════════════════════════════════════════════╝
+
+  📍 Branch / Remote / HEAD / Author / Time
+
+  ┌─ Commit Summary ─────────────────────────────────────┐
+  │  Ahead: N commit(s) / Behind: M commit(s)
+  └──────────────────────────────────────────────────────┘
+
+  📝 Commits with quality markers (✓ conventional / ⚠ WIP)
+
+  ┌─ Code Changes ───────────────────────────────────────┐
+  │  Files / Lines added / Lines removed + visual bar
+  └──────────────────────────────────────────────────────┘
+
+  📂 File Categories: 💻 Code / 🧪 Tests / 📖 Docs / ⚙️ Config
+
+  🚨 SENSITIVE FILES DETECTED (.env, *.pem, credentials, ...)
+
+  ┌─ Risk Assessment ────────────────────────────────────┐
+  │  Score: 🔴 CRITICAL (85) — auth + payment
+  │  [████████████████████████████████████████████]
+  └──────────────────────────────────────────────────────┘
+
+  📊 Push Quality Scorecard:
+     ✅ Conventional commit messages
+     ✅ Code changes accompanied by tests
+     ❌ Sensitive files in changeset
+     ✅ Up to date with remote
+     ⚠️  High risk score — review carefully
+
+  ┌─ Recommendation ─────────────────────────────────────┐
+  │  🔴 NOT RECOMMENDED (3/5 checks passed)
+  └──────────────────────────────────────────────────────┘
+
+  ┌─ Decision ───────────────────────────────────────────┐
+  │  y — push   |   n — cancel   |   d — view diff   |   l — view log
+  └──────────────────────────────────────────────────────┘
+```
+
+**Quality checks**:
+1. Conventional commit messages (`feat|fix|chore|...:`)
+2. Test files updated alongside code
+3. No sensitive files (`.env`, `*.pem`, `credentials`, etc.)
+4. Up to date with remote (not behind)
+5. Risk level acceptable (<80)
+
+---
+
+## Model Strategy
+
+### Four Independent Providers
+
+| Provider | API Path | Required Env | Custom Endpoint |
 |---|---|---|---|
-| `cost`     | gpt-5-nano  | gemini-2.5-flash-lite | ~$0.0007 |
-| `balanced` | gpt-5-mini  | gemini-2.5-flash      | ~$0.0046 |
-| `quality`  | gpt-5       | gemini-2.5-pro        | ~$0.0440 |
+| `codex` | Codex CLI (calls OpenAI) | `codex` binary | `CCG_CODEX_BASE_URL` / `OPENAI_BASE_URL` |
+| `claude` | Direct Anthropic API | `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY` | `CCG_CLAUDE_BASE_URL` / `ANTHROPIC_BASE_URL` |
+| `gemini` | Gemini CLI (calls Google) | `gemini` binary + `GEMINI_API_KEY` | `CCG_GEMINI_BASE_URL` / `GEMINI_BASE_URL` |
+| `bailian` | Direct Aliyun Bailian API | `BAILIAN_API_KEY` | `CCG_BAILIAN_BASE_URL` |
 
-Track your spend:
+### Three Modes
 
-```bash
-source ~/.claude/commands/ccg.sh
-ccg_usage --this-month      # monthly breakdown by provider
-ccg_usage --all             # cumulative
-```
+CCG auto-selects mode based on risk score, or you can force it via `CCG_MODE`.
 
-## Not for (scope boundaries)
-
-ccg is purpose-built for high-judgment code reviews. It's *not* a replacement for:
-
-- **Static analysis** — pair it with Semgrep / CodeQL, don't use it instead
-- **Linters or formatters** — those catch style; ccg catches architecture
-- **Streaming dialogue** — ccg is one-shot; for multi-turn conversation use the Codex / Gemini CLIs directly
-- **IDEs other than Claude Code** — try [zen-mcp-server](https://github.com/BeehiveInnovations/zen-mcp-server) for VS Code / JetBrains
-
-## SVN support (experimental)
-
-ccg works with SVN 1.7+ working copies, including TortoiseSVN 1.10.
-
-```bash
-# In your SVN working copy:
-source /path/to/ccg.sh
-ccg_install_hook   # writes .ccg-precommit-hook.sh + prints TortoiseSVN config string
-```
-
-`svn diff --git` produces standard unified diff format, so all ccg layers (risk scoring, ledger, history) work without modification. SVN revision numbers are stored as `r<N>` in place of git SHAs.
-
-See [docs/SVN.md](docs/SVN.md) for TortoiseSVN setup, Windows `.bat` wrapper, and offline fallback.
-
-## Commit gate (pre-commit hook)
-
-Block commits when ccg verdict is `fix-required`:
-
-```bash
-source /path/to/ccg.sh
-ccg_install_hook   # git: writes .git/hooks/pre-commit  |  svn: writes .ccg-precommit-hook.sh
-```
-
-| Verdict | Default | Override |
+| Risk Score | Auto Mode | Strategy |
 |---|---|---|
-| `merge` | allow | — |
-| `fix-required` | **block** | — |
-| `discuss` | allow | `CCG_GATE_DISCUSS=block` |
+| `< 30` | `cost` | Use cheap Bailian models everywhere |
+| `30 – 70` | `balanced` | Mix of mid-tier models per provider |
+| `> 70` | `quality` | Top-tier models per provider |
 
-Set `CCG_GATE_OFFLINE=1` to skip the LLM review when offline.
+### Model Per Mode
 
-## Architecture & contributing
+| Mode | codex | claude | gemini | bailian |
+|---|---|---|---|---|
+| **`cost`** | `deepseek-v4` | `claude-haiku-4-5` | `qwen-3.7` | `kimi-k2.6` |
+| **`balanced`** | `gpt-5.4` | `claude-sonnet-4-6` | `gemini-2.5-flash` | `qwen-3.6` |
+| **`quality`** | `gpt-5.5` | `claude-opus-4-7` | `gemini-3.5-flash` | `deepseek-v4` |
 
-ccg is **8 layers** (L0–L7), only the top one is "divergence detection". Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before changing anything in `ccg.sh`.
+### Per-Stage Model Usage
 
-Tests:
+| Stage | Uses Models? | Which Models |
+|---|---|---|
+| **Diff Capture** | ❌ | Pure git ops |
+| **Risk Score** | ✅ Bailian LLM | Falls back to rule engine |
+| **Stage 1: Review** | ✅ **any 2 slots in parallel** | Default: codex + gemini. Same provider can run twice with different models (e.g., `bailian:qwen-3.7 bailian:deepseek-v4`) |
+| **Synthesize** | ✅ 1 model | **Claude preferred** (reserved meta-reviewer) → fallback: codex → bailian → gemini |
+| **Stage 2: Commit Gate** | ❌ **NO LLM** | Reuses Stage 1 synthesis verdict (zero extra cost) |
+| **Stage 3: Merge Conflicts** | ✅ **3-tier fallback** | Bailian → Claude → Codex+Gemini |
+| **Stage 4: Push Check** | ✅ Bailian LLM | Risk scoring only |
+
+### Available Bailian Models
+
+| Model | Tier | Input ¥/1M | Output ¥/1M | Notes |
+|---|---|---|---|---|
+| `qwen-3.7` | quality | 0.30 | 0.90 | Latest Qwen |
+| `deepseek-v4` | quality | 0.35 | 1.05 | Top reasoning |
+| `kimi-k2.6` | quality | 0.32 | 0.96 | Long context |
+| `glm-5.1` | quality | 0.28 | 0.84 | Multimodal |
+| `qwen-3.6` | balanced | 0.25 | 0.75 | |
+| `mimo-v2.5-pro` | balanced | 0.22 | 0.66 | |
+| `qwen-3.6-plus` | balanced | 0.20 | 0.60 | |
+| `qwen-3.5-sonnet` | balanced | 0.15 | 0.45 | |
+| `deepseek-v4-lite` | balanced | 0.18 | 0.54 | |
+| `kimi-k2.6-lite` | balanced | 0.16 | 0.48 | |
+| `glm-5.1-lite` | balanced | 0.14 | 0.42 | |
+| `mimo-v2.5` | cost | 0.11 | 0.33 | |
+| `qwen-3.5-haiku` | cost | 0.05 | 0.15 | Cheapest |
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `CCG_MODE` | auto | `cost` / `balanced` / `quality` |
+| `CCG_REVIEW` | `on` | Master switch: `on` / `off` (when off, `ccg review` is a no-op and `ccg commit` skips state check) |
+| `CCG_PROVIDERS` | `codex gemini` | Providers for Stage 1 (max 2 parallel). Claude is reserved for Synthesis by default. |
+| **Provider models** | | |
+| `CCG_CODEX_MODEL` | by mode | Override Codex model |
+| `CCG_CLAUDE_MODEL` | by mode | Override Claude model |
+| `CCG_GEMINI_MODEL` | by mode | Override Gemini model |
+| `CCG_BAILIAN_MODEL` | by mode | Override Bailian model |
+| **API keys** | | |
+| `BAILIAN_API_KEY` | — | Bailian (Aliyun) API key |
+| `ANTHROPIC_API_KEY` / `CLAUDE_API_KEY` | — | Anthropic API key |
+| `GEMINI_API_KEY` | — | Google Gemini API key |
+| **Custom endpoints (proxies)** | | |
+| `CCG_CODEX_BASE_URL` / `OPENAI_BASE_URL` | OpenAI | Codex / OpenAI proxy URL |
+| `CCG_CLAUDE_BASE_URL` / `ANTHROPIC_BASE_URL` | api.anthropic.com | Claude proxy URL |
+| `CCG_GEMINI_BASE_URL` / `GEMINI_BASE_URL` | Google | Gemini proxy URL |
+| `CCG_BAILIAN_BASE_URL` | dashscope.aliyuncs.com | Bailian proxy URL |
+| **Other** | | |
+| `CCG_GATE_OFFLINE` | 0 | Set to 1 to skip Stage 2 review (legacy gate) |
+| `CCG_GATE_DISCUSS` | allow | Set to `block` to block discuss verdict |
+| `CCG_NO_AUTO_ADD` | 0 | Stage 2: skip auto `git add -A`, use only what's already staged |
+| `CCG_COMMIT_FORCE` | 0 | Stage 2: bypass diff-hash check (force commit even if diff changed) |
+| `CCG_MERGE_DRY_RUN` | 0 | Stage 3: resolve but don't commit |
+| `CCG_MERGE_NO_AI` | 0 | Stage 3: skip AI resolution |
+| `CCG_MERGE_NO_FETCH` | 0 | Stage 3: skip remote fetch |
+| `CCG_MERGE_MAX_CONFLICTS` | 50 | Stage 3: max conflict files |
+| `CCG_MERGE_KEEP_BACKUP` | 0 | Stage 3: keep backup branch after success |
+| `CCG_CACHE_TTL_HOURS` | 24 | Prompt cache TTL |
+| `CCG_KEEP_ARTIFACTS` | 0 | Keep workdir for debugging |
+
+### Usage Examples
 
 ```bash
-bash tests/test_ccg.sh                # 99 regression tests, ~31s
-REAL_CLI=1 bash tests/test_ccg.sh     # +2 live API tests (incurs cost)
+# Force quality mode for a critical review
+CCG_MODE=quality ccg review
+
+# Use only Bailian (offline-friendly for China)
+CCG_PROVIDERS="bailian" ccg review
+
+# Mix providers — codex + claude
+CCG_PROVIDERS="codex claude" ccg review
+
+# Specific Bailian model
+CCG_BAILIAN_MODEL=deepseek-v4 ccg review
+
+# Use OpenAI through proxy (e.g., for China)
+CCG_CODEX_BASE_URL="https://your-proxy.com/v1" ccg review
+
+# Use Claude through proxy (e.g., third-party gateway)
+CCG_CLAUDE_BASE_URL="https://tokensolo.com" ccg review
+
+# Dry-run merge (resolve but don't commit)
+CCG_MERGE_DRY_RUN=1 ccg merge main
+
+# Skip AI merge resolution (just detect conflicts)
+CCG_MERGE_NO_AI=1 ccg merge main
 ```
 
-## License & credits
+---
 
-MIT — see [LICENSE](LICENSE).
+## Architecture
 
-Built on [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode)'s original `/ccg` concept · Claude Code · OpenAI Codex CLI · Google Gemini CLI.
+```
+ccg/
+├── ccg                              # Entry point (4-line delegator)
+├── ccg.sh                           # Core engine (~3000 lines)
+│   ├── _ccg_xdg_* / _ccg_vcs_*     # XDG paths + git abstraction
+│   ├── ccg_init / ccg_preflight    # Workdir setup
+│   ├── ccg_diff_capture            # 4-level diff fallback
+│   ├── ccg_risk_score              # Bailian LLM + rule engine
+│   ├── ccg_codex / ccg_gemini      # Provider runners (with custom endpoint support)
+│   ├── ccg_claude / _ccg_claude_retry  # Direct Anthropic API (with custom endpoint)
+│   ├── _ccg_bailian_retry          # Bailian with retry/backoff
+│   ├── ccg_synthesize              # AGREEMENT/DIVERGENCE/BLINDSPOT
+│   ├── ccg_precommit_gate          # Stage 2 commit gate
+│   └── ccg_merge                   # Stage 3 AI merge (Bailian → Claude → Codex+Gemini)
+│       ├── _ccg_classify_conflict  # content/binary/submodule/...
+│       ├── _ccg_parse_conflicts    # extract <<<<<<<>>>>>>> blocks
+│       ├── _ccg_resolve_one_conflict  # 3-tier AI resolution
+│       └── _ccg_apply_resolutions  # atomic file rewrite
+├── ccg-bailian-models.sh           # 13-model Bailian registry
+├── ccg-bailian-integration.sh      # Bailian API call helpers
+├── ccg-multi-provider.sh           # 4-provider orchestration
+├── ccg-workflow.sh                 # 4-stage workflow entry points
+└── ccg.md                          # Claude Code slash command spec
+
+docs/
+├── README.zh-CN.md / .ja.md / .ko.md    # Translations
+├── ARCHITECTURE.md (+ 3 translations)   # Deep architecture
+├── CHANGELOG.md                         # Version history
+└── SVN.md                               # SVN integration notes
+```
+
+### Storage (XDG-compliant)
+
+| Path | Content |
+|---|---|
+| `$XDG_DATA_HOME/ccg/usage.log` | Token usage + cost log |
+| `$XDG_DATA_HOME/ccg/ledger.jsonl` | Per-review JSONL ledger |
+| `$XDG_CACHE_HOME/ccg/cache/` | Prompt hash → result cache (24h TTL) |
+| `$XDG_CONFIG_HOME/ccg/` | User config |
+
+Legacy `~/.ccg/*` auto-migrated on first run.
+
+---
+
+## Documentation
+
+- [Architecture deep-dive](docs/ARCHITECTURE.md) ([中文](docs/ARCHITECTURE.zh-CN.md) · [日本語](docs/ARCHITECTURE.ja.md) · [한국어](docs/ARCHITECTURE.ko.md))
+- [Changelog](docs/CHANGELOG.md)
+- [SVN integration](docs/SVN.md)
+- [Slash command spec](ccg.md) — Claude Code `/ccg` command
+
+---
+
+## License
+
+MIT

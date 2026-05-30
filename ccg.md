@@ -39,9 +39,9 @@ description: Code-divergence detector. Run Codex+Gemini in parallel on a diff, t
 
 | Mode | Codex | Gemini |
 |---|---|---|
-| `cost` | gpt-5-nano | gemini-2.5-flash-lite |
-| `balanced` (默认) | gpt-5-mini | gemini-2.5-flash |
-| `quality` | gpt-5 | gemini-2.5-pro |
+| `cost` | deepseek-v4 | qwen-3.7 |
+| `balanced` (默认) | gpt-5.4 | gemini-2.5-flash |
+| `quality` | gpt-5.5 | gemini-3.5-flash |
 
 > ⚠️ 第三方代理若不支持上述模型名，会 5xx/404。用 `CCG_CODEX_MODEL`/`CCG_GEMINI_MODEL` 显式指定代理实际支持的型号。
 

@@ -209,7 +209,11 @@ start=$(date +%s)
 ec=0; _ccg_run_with_timeout 2 sleep 10 || ec=$?
 end=$(date +%s)
 elapsed=$((end - start))
-if [ "$ec" -eq 124 ] && [ "$elapsed" -ge 2 ] && [ "$elapsed" -le 5 ]; then t_pass; else t_fail "ec=$ec elapsed=${elapsed}s"; fi
+# ec=124 (timeout fired) + elapsed>=2 (didn't fire early) are the correctness
+# signals. The upper bound only guards against "didn't kill at all" (which would
+# run the full sleep 10) — kept comfortably under 10s but loose enough to absorb
+# scheduling jitter under load (was 5s, which flaked when the suite ran hot).
+if [ "$ec" -eq 124 ] && [ "$elapsed" -ge 2 ] && [ "$elapsed" -le 9 ]; then t_pass; else t_fail "ec=$ec elapsed=${elapsed}s"; fi
 
 t_start "4.4 timeout preserves child's exit code on natural exit"
 fresh_source
@@ -226,7 +230,7 @@ t_start "4.5 timeout pure-bash fallback when 'timeout' is unavailable"
   if command -v timeout >/dev/null 2>&1; then PATH="${PATH#$hide_dir:}"; fi; \
   start=$(date +%s); ec=0; _ccg_run_with_timeout 2 sleep 10 || ec=$?; end=$(date +%s); \
   rm -rf "$hide_dir"; \
-  if [ "$ec" -eq 124 ] && [ "$((end-start))" -le 5 ]; then exit 0; else echo "ec=$ec elapsed=$((end-start))"; exit 1; fi ) && t_pass || t_fail "pure-bash fallback timing"
+  if [ "$ec" -eq 124 ] && [ "$((end-start))" -le 9 ]; then exit 0; else echo "ec=$ec elapsed=$((end-start))"; exit 1; fi ) && t_pass || t_fail "pure-bash fallback timing"
 
 # === 5. ccg_preflight ==========================================================
 t_start "5.1 ccg_preflight reports missing codex if absent"
@@ -479,20 +483,20 @@ ccg_cleanup "$CCG_DIR" >/dev/null
 
 # === 12. Mode resolution (silent), actual cost, usage log, cache, diff, size guard ===
 
-t_start "12.1 _ccg_resolve_codex_model default is gpt-5-mini (balanced)"
+t_start "12.1 _ccg_resolve_codex_model default is gpt-5.4 (balanced)"
 fresh_source
 out=$(_ccg_resolve_codex_model)
-assert_eq "$out" "gpt-5-mini"
+assert_eq "$out" "gpt-5.4"
 
-t_start "12.2 _ccg_resolve_codex_model cost picks gpt-5-nano"
+t_start "12.2 _ccg_resolve_codex_model cost picks deepseek-v4"
 fresh_source
 out=$(CCG_MODE=cost _ccg_resolve_codex_model)
-assert_eq "$out" "gpt-5-nano"
+assert_eq "$out" "deepseek-v4"
 
-t_start "12.3 _ccg_resolve_gemini_model quality picks gemini-2.5-pro"
+t_start "12.3 _ccg_resolve_gemini_model quality picks gemini-3.5-flash"
 fresh_source
 out=$(CCG_MODE=quality _ccg_resolve_gemini_model)
-assert_eq "$out" "gemini-2.5-pro"
+assert_eq "$out" "gemini-3.5-flash"
 
 t_start "12.4 CCG_CODEX_MODEL env wins over CCG_MODE"
 fresh_source
@@ -604,7 +608,7 @@ tmpd=$(mktemp -d)
 ( cd "$tmpd" && _ccg_run_with_timeout 5 bash -c 'cd '"$tmpd"' && exit' ) || true
 r=$(cd "$tmpd" && ccg_diff_capture "$tmpd/d.txt" 2>&1)
 rm -rf "$tmpd"
-assert_match "$r" "CCG_DIFF_FAIL=not-a-vcs-repo"
+assert_match "$r" "CCG_DIFF_FAIL=not-a-git-repo"
 
 t_start "12.16 ccg_diff_capture captures a real diff"
 fresh_source

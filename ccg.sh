@@ -10,11 +10,12 @@
 #
 # Public API:
 #   ccg_init                          → echo CCG_DIR=... CCG_*_PROMPT=... etc.
-#   ccg_preflight                     → echo CCG_PREFLIGHT_{CODEX,GEMINI}={ok|...}
+#   ccg_preflight                     → echo CCG_PREFLIGHT_{CODEX,GEMINI,BAILIAN}={ok|...}
 #   ccg_diff_capture <out_file>       → 4-level fallback; emits CCG_DIFF_SOURCE
 #   ccg_risk_score <diff_file>        → deterministic 0..100+ score → suggested mode
 #   ccg_codex <prompt> <out>          → call codex; honors cache; logs usage
 #   ccg_gemini <prompt> <out>         → call gemini; honors cache; logs usage
+#   ccg_bailian <prompt> <out>        → call bailian; honors cache; logs usage
 #   ccg_actual <prompt_f> <result_f> <provider> → echo USD actual cost
 #   ccg_usage [--this-month|--all]    → summarize $XDG_DATA_HOME/ccg/usage.log
 #   ccg_ledger_record <workdir>       → append JSONL row to $XDG_DATA_HOME/ccg/ledger.jsonl
@@ -27,8 +28,13 @@
 #                         (empty/auto + risk score available → auto-pick)
 #   CCG_CODEX_MODEL     — Override codex model (wins over CCG_MODE)
 #   CCG_GEMINI_MODEL    — Override gemini model (wins over CCG_MODE)
+#   CCG_BAILIAN_MODEL   — Override bailian model (wins over CCG_MODE)
 #   CCG_CODEX_TIMEOUT   — Codex hard timeout seconds (default: 240)
 #   CCG_GEMINI_TIMEOUT  — Gemini hard timeout seconds (default: 120)
+#   CCG_BAILIAN_TIMEOUT — Bailian hard timeout seconds (default: 120)
+#   CCG_BAILIAN_TEMP    — Bailian temperature (default: 0.7)
+#   CCG_BAILIAN_MAX_TOKENS — Bailian max tokens (default: 4096)
+#   CCG_BAILIAN_RETRIES — Bailian retry attempts (default: 3)
 #   CCG_KEEP_ARTIFACTS  — Set to 1 to keep workdir for debugging
 #   CCG_NO_CACHE        — Set to 1 to bypass prompt-hash cache
 #   CCG_CACHE_TTL_HOURS — Cache TTL in hours (default: 24)
@@ -198,6 +204,12 @@ _ccg_price() {
   local model="$1" field="${2:-input}"
   local in_price out_price
   case "$model" in
+    # OpenAI (Codex)
+    # gpt-5.5 / gpt-5.4 are the current default codex models (quality / balanced).
+    # Estimated at the same rate as the gpt-5 / gpt-5-mini tiers they succeed —
+    # refresh when official rates are published.
+    gpt-5.5|gpt-5.5-*)               in_price=1.25;   out_price=10.00 ;;
+    gpt-5.4|gpt-5.4-*)               in_price=0.25;   out_price=2.00 ;;
     gpt-5|gpt-5-2025-*)              in_price=1.25;   out_price=10.00 ;;
     gpt-5-mini|gpt-5-mini-*)         in_price=0.25;   out_price=2.00 ;;
     gpt-5-nano|gpt-5-nano-*)         in_price=0.05;   out_price=0.40 ;;
@@ -207,11 +219,37 @@ _ccg_price() {
     gpt-4o-mini)                     in_price=0.15;   out_price=0.60 ;;
     o3|o3-*)                         in_price=2.00;   out_price=8.00 ;;
     o4-mini|o4-mini-*)               in_price=1.10;   out_price=4.40 ;;
+    # Google (Gemini)
+    # gemini-3.5-flash is the current default quality gemini; estimated at the
+    # gemini-2.5-pro tier it replaces until official rates are published.
+    gemini-3.5-flash|gemini-3.5-flash-*) in_price=1.25; out_price=10.00 ;;
     gemini-2.5-pro|gemini-2.5-pro-*) in_price=1.25;   out_price=10.00 ;;
     gemini-2.5-flash|gemini-2.5-flash-2025-*) in_price=0.075; out_price=0.30 ;;
     gemini-2.5-flash-lite|gemini-2.5-flash-lite-*) in_price=0.05; out_price=0.20 ;;
     gemini-1.5-pro|gemini-1.5-pro-*) in_price=1.25;   out_price=5.00 ;;
     gemini-1.5-flash|gemini-1.5-flash-*) in_price=0.075; out_price=0.30 ;;
+    # Alibaba Bailian - Qwen
+    qwen-3.7|qwen-3.7-*)             in_price=0.30;   out_price=0.90 ;;
+    qwen-3.6|qwen-3.6-*)             in_price=0.25;   out_price=0.75 ;;
+    qwen-3.6-plus|qwen-3.6-plus-*)   in_price=0.20;   out_price=0.60 ;;
+    qwen-3.5-sonnet|qwen-3.5-sonnet-*) in_price=0.15;   out_price=0.45 ;;
+    qwen-3.5-haiku|qwen-3.5-haiku-*) in_price=0.05;   out_price=0.15 ;;
+    # Alibaba Bailian - DeepSeek
+    deepseek-v4|deepseek-v4-*)       in_price=0.35;   out_price=1.05 ;;
+    deepseek-v4-lite|deepseek-v4-lite-*) in_price=0.18; out_price=0.54 ;;
+    # Alibaba Bailian - Kimi
+    kimi-k2.6|kimi-k2.6-*)           in_price=0.32;   out_price=0.96 ;;
+    kimi-k2.6-lite|kimi-k2.6-lite-*) in_price=0.16;   out_price=0.48 ;;
+    # Alibaba Bailian - GLM
+    glm-5.1|glm-5.1-*)               in_price=0.28;   out_price=0.84 ;;
+    glm-5.1-lite|glm-5.1-lite-*)     in_price=0.14;   out_price=0.42 ;;
+    # Alibaba Bailian - Mimo
+    mimo-v2.5-pro|mimo-v2.5-pro-*)   in_price=0.22;   out_price=0.66 ;;
+    mimo-v2.5|mimo-v2.5-*)           in_price=0.11;   out_price=0.33 ;;
+    # Anthropic (direct API)
+    claude-opus-4-7|claude-opus-4-7-*)   in_price=15.00;  out_price=75.00 ;;
+    claude-sonnet-4-6|claude-sonnet-4-6-*) in_price=3.00; out_price=15.00 ;;
+    claude-haiku-4-5|claude-haiku-4-5-*) in_price=1.00;   out_price=5.00 ;;
     *)                               in_price=0;      out_price=0 ;;
   esac
   case "$field" in
@@ -231,17 +269,33 @@ _ccg_tokens_from_chars() {
 _ccg_resolve_codex_model() {
   if [ -n "${CCG_CODEX_MODEL:-}" ]; then echo "$CCG_CODEX_MODEL"; return; fi
   case "${CCG_MODE:-balanced}" in
-    cost)    echo "gpt-5-nano" ;;
-    quality) echo "gpt-5" ;;
-    *)       echo "gpt-5-mini" ;;
+    cost)    echo "deepseek-v4" ;;
+    quality) echo "gpt-5.5" ;;
+    *)       echo "gpt-5.4" ;;
   esac
 }
 _ccg_resolve_gemini_model() {
   if [ -n "${CCG_GEMINI_MODEL:-}" ]; then echo "$CCG_GEMINI_MODEL"; return; fi
   case "${CCG_MODE:-balanced}" in
-    cost)    echo "gemini-2.5-flash-lite" ;;
-    quality) echo "gemini-2.5-pro" ;;
+    cost)    echo "qwen-3.7" ;;
+    quality) echo "gemini-3.5-flash" ;;
     *)       echo "gemini-2.5-flash" ;;
+  esac
+}
+_ccg_resolve_claude_model() {
+  if [ -n "${CCG_CLAUDE_MODEL:-}" ]; then echo "$CCG_CLAUDE_MODEL"; return; fi
+  case "${CCG_MODE:-balanced}" in
+    cost)    echo "claude-haiku-4-5" ;;
+    quality) echo "claude-opus-4-7" ;;
+    *)       echo "claude-sonnet-4-6" ;;
+  esac
+}
+_ccg_resolve_bailian_model() {
+  if [ -n "${CCG_BAILIAN_MODEL:-}" ]; then echo "$CCG_BAILIAN_MODEL"; return; fi
+  case "${CCG_MODE:-balanced}" in
+    cost)    echo "kimi-k2.6" ;;
+    quality) echo "deepseek-v4" ;;
+    *)       echo "qwen-3.6" ;;
   esac
 }
 
@@ -397,6 +451,30 @@ ccg_usage() {
 }
 
 # ============================================================
+# Internal: full worktree diff vs HEAD, INCLUDING untracked files.
+# Mirrors exactly what `git add -A && git diff --cached` produces (the scope
+# ccg_commit stages), but computes it in a throwaway index so the user's real
+# index is never mutated. Falls back to plain `git diff HEAD` if anything fails.
+# This keeps the Stage 1 review scope == the Stage 2 commit scope, so a brand-new
+# (untracked) file is reviewed and the diff-hash gate matches on commit.
+# ============================================================
+_ccg_worktree_diff_all() {
+  local git_dir tmp_index
+  git_dir=$(git rev-parse --git-dir 2>/dev/null) || { git diff HEAD 2>/dev/null; return; }
+  tmp_index=$(mktemp 2>/dev/null) || { git diff HEAD 2>/dev/null; return; }
+  # Seed the temp index from the real one so any already-staged state is kept.
+  if [ -f "$git_dir/index" ]; then
+    cp "$git_dir/index" "$tmp_index" 2>/dev/null || :
+  fi
+  if GIT_INDEX_FILE="$tmp_index" git add -A 2>/dev/null; then
+    GIT_INDEX_FILE="$tmp_index" git diff --cached HEAD 2>/dev/null
+  else
+    git diff HEAD 2>/dev/null
+  fi
+  rm -f "$tmp_index" 2>/dev/null || :
+}
+
+# ============================================================
 # Public: ccg_diff_capture <out_file>
 # Fallback chain: worktree → staged → upstream(branch) → origin-head
 # Emits CCG_DIFF_SOURCE so callers know what scope was captured.
@@ -426,7 +504,9 @@ ccg_diff_capture() {
     diff_text=$(git diff --cached 2>/dev/null)
     [ -n "$diff_text" ] && source="staged"
   else
-    diff_text=$(git diff HEAD 2>/dev/null)
+    # Worktree mode: capture ALL changes git add -A would stage (tracked +
+    # untracked) so the review scope matches the commit scope.
+    diff_text=$(_ccg_worktree_diff_all)
     [ -n "$diff_text" ] && source="worktree"
 
     if [ -z "$diff_text" ]; then
@@ -480,16 +560,57 @@ ccg_risk_score() {
     echo "CCG_RISK_FAIL=empty-diff"; return 2
   fi
 
+  # Use Bailian LLM for risk scoring if available
+  if [ -n "${BAILIAN_API_KEY:-}" ]; then
+    local workdir prompt_file result_file
+    workdir=$(mktemp -d -t ccg.risk.XXXXXXXX) || return 2
+    prompt_file="$workdir/risk.prompt"
+    result_file="$workdir/risk.result"
+
+    {
+      printf 'Analyze this git diff for code change risk and output a risk score (0-100).\n\n'
+      printf 'Consider these risk factors:\n'
+      printf '- High-risk paths: auth, payment, crypto, migration, security, infra, CI\n'
+      printf '- High-risk operations: exec, eval, SQL injection, rm -rf, privilege escalation\n'
+      printf '- Size: files changed, total lines changed\n\n'
+      printf 'Output format (EXACTLY):\nRISK_SCORE: <0-100 number>\nRISK_MODE: cost|balanced|quality\nRISK_REASONS: <comma-separated labels>\n\n'
+      printf 'Diff to analyze:\n===BEGIN_DIFF===\n'
+      cat "$diff_file"
+      printf '\n===END_DIFF===\n'
+    } > "$prompt_file"
+
+    _ccg_bailian_retry "$prompt_file" "$result_file" >/dev/null 2>&1 || true
+
+    if [ -s "$result_file" ]; then
+      local score mode reasons
+      score=$(grep '^RISK_SCORE:' "$result_file" | cut -d: -f2 | tr -d ' ')
+      mode=$(grep '^RISK_MODE:' "$result_file" | cut -d: -f2 | tr -d ' ')
+      reasons=$(grep '^RISK_REASONS:' "$result_file" | cut -d: -f2- | sed 's/^ //')
+
+      : "${score:=50}"
+      : "${mode:=balanced}"
+      : "${reasons:=none}"
+
+      rm -rf "$workdir"
+
+      printf 'CCG_RISK_SCORE=%s\n' "$score"
+      printf 'CCG_RISK_MODE=%s\n' "$mode"
+      printf 'CCG_RISK_REASONS=%s\n' "$reasons"
+      return 0
+    fi
+
+    rm -rf "$workdir"
+  fi
+
+  # Fallback to deterministic rule-based scoring
   local score=0 reasons=""
-  local files_changed lines_added lines_removed total_changed
+  local files_changed lines_added lines_removed
 
   files_changed=$(grep -cE '^diff --git ' "$diff_file" 2>/dev/null | head -1)
   lines_added=$(grep -cE '^\+[^+]' "$diff_file" 2>/dev/null | head -1)
   lines_removed=$(grep -cE '^-[^-]' "$diff_file" 2>/dev/null | head -1)
   : "${files_changed:=0}"; : "${lines_added:=0}"; : "${lines_removed:=0}"
-  total_changed=$((lines_added + lines_removed))
 
-  # File path signals (high-risk areas)
   local path_block
   path_block=$(grep -E '^diff --git ' "$diff_file" 2>/dev/null || true)
 
@@ -509,16 +630,13 @@ ccg_risk_score() {
   _risk_path_match '/(infra|terraform|kubernetes|k8s|helm|deploy)' 20 "infra"
   _risk_path_match '/(\.github/workflows|ci|pipeline)' 15 "ci"
 
-  # Low-risk path signals (subtract)
-  if printf '%s\n' "$path_block" \
-     | grep -qE '\.(md|txt|rst|adoc)$|/docs?/|/CHANGELOG'; then
+  if printf '%s\n' "$path_block" | grep -qE '\.(md|txt|rst|adoc)$|/docs?/|/CHANGELOG'; then
     if ! printf '%s\n' "$path_block" | grep -qvE '\.(md|txt|rst|adoc)$|/docs?/|/CHANGELOG'; then
       score=$((score - 40))
       reasons="${reasons}${reasons:+ }docs_only-40"
     fi
   fi
 
-  # Content signals (operate on the diff body, +lines only)
   local added_body
   added_body=$(grep -E '^\+[^+]' "$diff_file" 2>/dev/null || true)
 
@@ -537,21 +655,18 @@ ccg_risk_score() {
   _risk_body_match '\b(localhost|0\.0\.0\.0|127\.0\.0\.1):[0-9]' 5 "hardcoded_host"
   _risk_body_match '\b(TODO|FIXME|XXX|HACK)\b' 5 "todo_marker"
 
-  # Size signal
-  if [ "$total_changed" -gt 600 ]; then
+  if [ "$((lines_added + lines_removed))" -gt 600 ]; then
     score=$((score + 25)); reasons="${reasons}${reasons:+ }size>600+25"
-  elif [ "$total_changed" -gt 300 ]; then
+  elif [ "$((lines_added + lines_removed))" -gt 300 ]; then
     score=$((score + 15)); reasons="${reasons}${reasons:+ }size>300+15"
-  elif [ "$total_changed" -gt 100 ]; then
+  elif [ "$((lines_added + lines_removed))" -gt 100 ]; then
     score=$((score + 5)); reasons="${reasons}${reasons:+ }size>100+5"
   fi
 
-  # Multi-file blast radius
   if [ "$files_changed" -gt 8 ]; then
     score=$((score + 10)); reasons="${reasons}${reasons:+ }files>8+10"
   fi
 
-  # Floor
   [ "$score" -lt 0 ] && score=0
 
   local mode
@@ -562,8 +677,6 @@ ccg_risk_score() {
 
   printf 'CCG_RISK_SCORE=%d\n' "$score"
   printf 'CCG_RISK_MODE=%s\n'  "$mode"
-  printf 'CCG_RISK_FILES=%d\n' "$files_changed"
-  printf 'CCG_RISK_LINES=+%d-%d\n' "$lines_added" "$lines_removed"
   printf 'CCG_RISK_REASONS=%s\n' "${reasons:-none}"
 }
 
@@ -1029,10 +1142,16 @@ ccg_init() {
   printf 'CCG_DIR=%s\n' "$workdir"
   printf 'CCG_CODEX_PROMPT=%s\n' "$workdir/codex.prompt"
   printf 'CCG_GEMINI_PROMPT=%s\n' "$workdir/gemini.prompt"
+  printf 'CCG_CLAUDE_PROMPT=%s\n' "$workdir/claude.prompt"
+  printf 'CCG_BAILIAN_PROMPT=%s\n' "$workdir/bailian.prompt"
   printf 'CCG_CODEX_RESULT=%s\n' "$workdir/codex.result"
   printf 'CCG_GEMINI_RESULT=%s\n' "$workdir/gemini.result"
+  printf 'CCG_CLAUDE_RESULT=%s\n' "$workdir/claude.result"
+  printf 'CCG_BAILIAN_RESULT=%s\n' "$workdir/bailian.result"
   printf 'CCG_CODEX_ERR=%s\n'    "$workdir/codex.err"
   printf 'CCG_GEMINI_ERR=%s\n'   "$workdir/gemini.err"
+  printf 'CCG_CLAUDE_ERR=%s\n'   "$workdir/claude.err"
+  printf 'CCG_BAILIAN_ERR=%s\n'  "$workdir/bailian.err"
   printf 'CCG_DIFF_FILE=%s\n'    "$workdir/diff.txt"
   printf 'CCG_SYNTHESIS_FILE=%s\n' "$workdir/synthesis.txt"
   printf 'CCG_RISK_FILE=%s\n'    "$workdir/risk.txt"
@@ -1050,17 +1169,100 @@ ccg_preflight() {
 
   if ! command -v gemini >/dev/null 2>&1; then
     echo "CCG_PREFLIGHT_GEMINI=missing"
-    return 0
+  else
+    local launcher
+    if launcher=$(_ccg_pick_launcher GEMINI_API_KEY) && [ -n "$launcher" ] || \
+       [ -n "${GEMINI_API_KEY:-}" ]; then
+      echo "CCG_PREFLIGHT_GEMINI=ok"
+      echo "CCG_GEMINI_LAUNCHER=${launcher:-direct}"
+    else
+      echo "CCG_PREFLIGHT_GEMINI=no-api-key"
+    fi
   fi
 
-  local launcher
-  if launcher=$(_ccg_pick_launcher GEMINI_API_KEY) && [ -n "$launcher" ] || \
-     [ -n "${GEMINI_API_KEY:-}" ]; then
-    echo "CCG_PREFLIGHT_GEMINI=ok"
-    echo "CCG_GEMINI_LAUNCHER=${launcher:-direct}"
+  if [ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_API_KEY:-}" ]; then
+    echo "CCG_PREFLIGHT_CLAUDE=ok"
   else
-    echo "CCG_PREFLIGHT_GEMINI=no-api-key"
+    echo "CCG_PREFLIGHT_CLAUDE=no-api-key"
   fi
+
+  if [ -n "${BAILIAN_API_KEY:-}" ]; then
+    echo "CCG_PREFLIGHT_BAILIAN=ok"
+  else
+    echo "CCG_PREFLIGHT_BAILIAN=no-api-key"
+  fi
+}
+
+# ============================================================
+# Internal: retry with exponential backoff
+# ============================================================
+_ccg_bailian_retry() {
+  local prompt_file="$1"
+  local out_file="$2"
+  local max_retries="${CCG_BAILIAN_RETRIES:-3}"
+  local retry=0
+
+  while [ $retry -lt "$max_retries" ]; do
+    if ccg_bailian "$prompt_file" "$out_file"; then
+      return 0
+    fi
+    retry=$((retry + 1))
+    if [ $retry -lt "$max_retries" ]; then
+      local wait_sec=$((2 ** retry))
+      sleep "$wait_sec"
+    fi
+  done
+  return 1
+}
+
+# ============================================================
+# Public: stream Bailian response (real-time output)
+# ============================================================
+ccg_bailian_stream() {
+  local prompt_file="$1"
+  local timeout_sec="${CCG_BAILIAN_TIMEOUT:-120}"
+  local temperature="${CCG_BAILIAN_TEMP:-0.7}"
+  local max_tokens="${CCG_BAILIAN_MAX_TOKENS:-4096}"
+
+  local model
+  model=$(_ccg_resolve_bailian_model)
+
+  if [ ! -s "$prompt_file" ]; then
+    echo "CCG_BAILIAN_FAIL=empty-prompt" >&2; return 2
+  fi
+
+  if [ -z "${BAILIAN_API_KEY:-}" ]; then
+    echo "CCG_BAILIAN_FAIL=no-api-key" >&2; return 3
+  fi
+
+  local prompt_content
+  prompt_content=$(cat "$prompt_file")
+
+  local payload
+  payload=$(cat <<EOF
+{
+  "model": "$model",
+  "messages": [{"role": "user", "content": $(printf '%s\n' "$prompt_content" | jq -Rs .)}],
+  "temperature": $temperature,
+  "max_tokens": $max_tokens,
+  "stream": true
+}
+EOF
+)
+
+  local bailian_base="${CCG_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode}"
+  bailian_base="${bailian_base%/}"
+  _ccg_run_with_timeout "$timeout_sec" \
+    curl -s -X POST "${bailian_base}/v1/chat/completions" \
+    -H "Authorization: Bearer $BAILIAN_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$payload" | while IFS= read -r line; do
+      if [[ "$line" == *"data: "* ]]; then
+        local json="${line#data: }"
+        [ "$json" = "[DONE]" ] && break
+        jq -r '.choices[0].delta.content // empty' <<< "$json" 2>/dev/null
+      fi
+    done
 }
 
 # ============================================================
@@ -1126,8 +1328,13 @@ ccg_codex() {
 
   local ec=0
   # P1-J: write to .tmp; only promote and cache on clean exit (not SIGINT/SIGTERM).
+  # Custom endpoint support: CCG_CODEX_BASE_URL → OPENAI_BASE_URL pass-through.
+  local _codex_env=""
+  if [ -n "${CCG_CODEX_BASE_URL:-}" ]; then
+    _codex_env="OPENAI_BASE_URL=${CCG_CODEX_BASE_URL%/} OPENAI_API_BASE=${CCG_CODEX_BASE_URL%/}"
+  fi
   _ccg_run_with_timeout "$timeout_sec" \
-    codex exec --skip-git-repo-check -m "$model" --output-last-message "$out_file.tmp" - \
+    env $_codex_env codex exec --skip-git-repo-check -m "$model" --output-last-message "$out_file.tmp" - \
     < "$prompt_file" \
     > /dev/null \
     2> "$err_file" || ec=$?
@@ -1249,20 +1456,25 @@ ccg_gemini() {
 
   local ec=0
   # P1-J: write to .tmp; only promote and cache on clean exit (not SIGINT/SIGTERM).
+  # Custom endpoint support: CCG_GEMINI_BASE_URL → GOOGLE_GEMINI_BASE_URL pass-through.
+  local _gemini_env=""
+  if [ -n "${CCG_GEMINI_BASE_URL:-}" ]; then
+    _gemini_env="GOOGLE_GEMINI_BASE_URL=${CCG_GEMINI_BASE_URL%/} GEMINI_BASE_URL=${CCG_GEMINI_BASE_URL%/}"
+  fi
   if [ "$launcher_kind" = "direct" ]; then
     _ccg_run_with_timeout "$timeout_sec" \
-      gemini -m "$model" --output-format text \
+      env $_gemini_env gemini -m "$model" --output-format text \
       < "$prompt_file" > "$out_file.tmp" 2> "$err_file" || ec=$?
   elif [ "$launcher_kind" = "zsh" ]; then
     # shellcheck disable=SC2016
     _ccg_run_with_timeout "$timeout_sec" \
-      env "_CCG_M=$model" "_CCG_P=$prompt_file" \
+      env "_CCG_M=$model" "_CCG_P=$prompt_file" $_gemini_env \
       zsh -i -c 'gemini -m "$_CCG_M" --output-format text < "$_CCG_P"' \
       > "$out_file.tmp" 2> "$err_file" || ec=$?
   else
     # shellcheck disable=SC2016
     _ccg_run_with_timeout "$timeout_sec" \
-      env "_CCG_M=$model" "_CCG_P=$prompt_file" \
+      env "_CCG_M=$model" "_CCG_P=$prompt_file" $_gemini_env \
       bash -i -c 'gemini -m "$_CCG_M" --output-format text < "$_CCG_P"' \
       > "$out_file.tmp" 2> "$err_file" || ec=$?
   fi
@@ -1324,6 +1536,327 @@ ccg_gemini() {
 
   echo "CCG_GEMINI_OK=${sz}b"
   return 0
+}
+
+# ============================================================
+# Public: call Bailian/Alibaba (cache-aware, usage-logged)
+# ============================================================
+ccg_bailian() {
+  local prompt_file="$1"
+  local out_file="$2"
+  local err_file="${out_file%.result}.err"
+  local timeout_sec="${CCG_BAILIAN_TIMEOUT:-120}"
+  local temperature="${CCG_BAILIAN_TEMP:-0.7}"
+  local max_tokens="${CCG_BAILIAN_MAX_TOKENS:-4096}"
+
+  local model
+  model=$(_ccg_resolve_bailian_model)
+
+  if [ ! -s "$prompt_file" ]; then
+    : > "$out_file"; echo "CCG_BAILIAN_FAIL=empty-prompt"; return 2
+  fi
+  local oversize
+  if ! oversize=$(_ccg_check_prompt_size "$prompt_file"); then
+    : > "$out_file"; echo "CCG_BAILIAN_FAIL=$oversize"; return 2
+  fi
+
+  : > "$out_file"; : > "$err_file"
+
+  # Cache lookup
+  local cache_key cache_hit=""
+  if cache_key=$(_ccg_cache_key "$prompt_file" "$model" 2>/dev/null) && [ -n "$cache_key" ]; then
+    if cache_hit=$(_ccg_cache_lookup "$cache_key"); then
+      if ! cp "$cache_hit" "$out_file" 2>/dev/null; then
+        echo "CCG_BAILIAN_FAIL=cache-read-failed"
+        return 1
+      fi
+      local sz
+      sz=$(wc -c <"$out_file" | tr -d ' ')
+      local in_tok out_tok
+      in_tok=$(_ccg_tokens_from_chars "$(wc -c <"$prompt_file" | tr -d ' ')")
+      out_tok=$(_ccg_tokens_from_chars "$sz")
+      _ccg_log_usage bailian "$model" "$in_tok" "$out_tok" "0.000000" "1"
+      echo "CCG_BAILIAN_OK=${sz}b cache=hit"
+      return 0
+    fi
+  fi
+
+  if [ -z "${BAILIAN_API_KEY:-}" ]; then
+    echo "CCG_BAILIAN_FAIL=no-api-key"; return 3
+  fi
+
+  local prompt_content
+  prompt_content=$(cat "$prompt_file")
+
+  local payload
+  payload=$(cat <<EOF
+{
+  "model": "$model",
+  "messages": [{"role": "user", "content": $(printf '%s\n' "$prompt_content" | jq -Rs .)}],
+  "temperature": $temperature,
+  "max_tokens": $max_tokens,
+  "top_p": 0.95
+}
+EOF
+)
+
+  local ec=0
+  local bailian_base="${CCG_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode}"
+  bailian_base="${bailian_base%/}"
+  _ccg_run_with_timeout "$timeout_sec" \
+    curl -s -X POST "${bailian_base}/v1/chat/completions" \
+    -H "Authorization: Bearer $BAILIAN_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    > "$out_file.tmp" 2> "$err_file" || ec=$?
+
+  if [ "$ec" -eq 124 ]; then
+    rm -f "$out_file.tmp"
+    echo "CCG_BAILIAN_FAIL=timeout-${timeout_sec}s"; return 124
+  fi
+
+  if [ ! -s "$out_file.tmp" ]; then
+    rm -f "$out_file.tmp"
+    echo "CCG_BAILIAN_FAIL=empty-output (exit=$ec)"
+    tail -3 "$err_file" 2>/dev/null | _ccg_redact >> "$err_file"
+    return 1
+  fi
+
+  # Check for API errors
+  if LC_ALL=C head -c 500 "$out_file.tmp" | grep -qE '"error"|"code".*"[A-Z_]+"'; then
+    echo "CCG_BAILIAN_FAIL=api-error"
+    LC_ALL=C head -c 300 "$out_file.tmp" | _ccg_redact
+    rm -f "$out_file.tmp"
+    return 1
+  fi
+
+  # Extract content from OpenAI-compatible response
+  local content
+  content=$(jq -r '.choices[0].message.content // empty' "$out_file.tmp" 2>/dev/null)
+  if [ -z "$content" ]; then
+    rm -f "$out_file.tmp"
+    echo "CCG_BAILIAN_FAIL=parse-error"
+    jq . "$out_file.tmp" 2>/dev/null | head -5 >> "$err_file"
+    return 1
+  fi
+
+  echo "$content" > "$out_file"
+  rm -f "$out_file.tmp"
+
+  local sz
+  sz=$(wc -c <"$out_file" | tr -d ' ')
+
+  # Log usage
+  local in_tok out_tok in_price out_price usd
+  in_tok=$(_ccg_tokens_from_chars "$(wc -c <"$prompt_file" | tr -d ' ')")
+  out_tok=$(_ccg_tokens_from_chars "$sz")
+  in_price=$(_ccg_price "$model" input)
+  out_price=$(_ccg_price "$model" output)
+  usd=$(awk -v ip="$in_price" -v op="$out_price" -v it="$in_tok" -v ot="$out_tok" \
+        'BEGIN { printf "%.6f", (ip * it + op * ot) / 1000000 }')
+  _ccg_log_usage bailian "$model" "$in_tok" "$out_tok" "$usd" "0"
+
+  [ -n "$cache_key" ] && _ccg_cache_store "$cache_key" "$out_file"
+
+  echo "CCG_BAILIAN_OK=${sz}b"
+  return 0
+}
+
+# ============================================================
+# Public: call Claude/Anthropic directly (cache-aware, usage-logged)
+# Accepts ANTHROPIC_API_KEY or CLAUDE_API_KEY.
+# ============================================================
+ccg_claude() {
+  local prompt_file="$1"
+  local out_file="$2"
+  local err_file="${out_file%.result}.err"
+  local timeout_sec="${CCG_CLAUDE_TIMEOUT:-120}"
+  local max_tokens="${CCG_CLAUDE_MAX_TOKENS:-4096}"
+
+  local model
+  model=$(_ccg_resolve_claude_model)
+
+  local api_key="${ANTHROPIC_API_KEY:-${CLAUDE_API_KEY:-}}"
+
+  if [ ! -s "$prompt_file" ]; then
+    : > "$out_file"; echo "CCG_CLAUDE_FAIL=empty-prompt"; return 2
+  fi
+  local oversize
+  if ! oversize=$(_ccg_check_prompt_size "$prompt_file"); then
+    : > "$out_file"; echo "CCG_CLAUDE_FAIL=$oversize"; return 2
+  fi
+
+  : > "$out_file"; : > "$err_file"
+
+  # Cache lookup
+  local cache_key cache_hit=""
+  if cache_key=$(_ccg_cache_key "$prompt_file" "$model" 2>/dev/null) && [ -n "$cache_key" ]; then
+    if cache_hit=$(_ccg_cache_lookup "$cache_key"); then
+      if ! cp "$cache_hit" "$out_file" 2>/dev/null; then
+        echo "CCG_CLAUDE_FAIL=cache-read-failed"; return 1
+      fi
+      local sz
+      sz=$(wc -c <"$out_file" | tr -d ' ')
+      local in_tok out_tok
+      in_tok=$(_ccg_tokens_from_chars "$(wc -c <"$prompt_file" | tr -d ' ')")
+      out_tok=$(_ccg_tokens_from_chars "$sz")
+      _ccg_log_usage claude "$model" "$in_tok" "$out_tok" "0.000000" "1"
+      echo "CCG_CLAUDE_OK=${sz}b cache=hit"
+      return 0
+    fi
+  fi
+
+  if [ -z "$api_key" ]; then
+    echo "CCG_CLAUDE_FAIL=no-api-key"; return 3
+  fi
+
+  local prompt_content
+  prompt_content=$(cat "$prompt_file")
+
+  local payload
+  payload=$(cat <<EOF
+{
+  "model": "$model",
+  "max_tokens": $max_tokens,
+  "messages": [{"role": "user", "content": $(printf '%s\n' "$prompt_content" | jq -Rs .)}]
+}
+EOF
+)
+
+  local ec=0
+  local api_base="${CCG_CLAUDE_BASE_URL:-${ANTHROPIC_BASE_URL:-https://api.anthropic.com}}"
+  api_base="${api_base%/}"  # strip trailing slash
+  _ccg_run_with_timeout "$timeout_sec" \
+    curl -s -X POST "${api_base}/v1/messages" \
+    -H "x-api-key: $api_key" \
+    -H "anthropic-version: 2023-06-01" \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    > "$out_file.tmp" 2> "$err_file" || ec=$?
+
+  if [ "$ec" -eq 124 ]; then
+    rm -f "$out_file.tmp"
+    echo "CCG_CLAUDE_FAIL=timeout-${timeout_sec}s"; return 124
+  fi
+
+  if [ ! -s "$out_file.tmp" ]; then
+    rm -f "$out_file.tmp"
+    echo "CCG_CLAUDE_FAIL=empty-output (exit=$ec)"
+    tail -3 "$err_file" 2>/dev/null | _ccg_redact >> "$err_file"
+    return 1
+  fi
+
+  # Check for API errors (Anthropic returns {"type":"error","error":{...}})
+  if LC_ALL=C head -c 500 "$out_file.tmp" | grep -qE '"type"[[:space:]]*:[[:space:]]*"error"'; then
+    echo "CCG_CLAUDE_FAIL=api-error"
+    LC_ALL=C head -c 300 "$out_file.tmp" | _ccg_redact
+    rm -f "$out_file.tmp"
+    return 1
+  fi
+
+  # Extract content from Anthropic response: {"content":[{"type":"text","text":"..."}]}
+  local content
+  content=$(jq -r '.content[0].text // empty' "$out_file.tmp" 2>/dev/null)
+  if [ -z "$content" ]; then
+    rm -f "$out_file.tmp"
+    echo "CCG_CLAUDE_FAIL=parse-error"
+    jq . "$out_file.tmp" 2>/dev/null | head -5 >> "$err_file"
+    return 1
+  fi
+
+  echo "$content" > "$out_file"
+  rm -f "$out_file.tmp"
+
+  local sz
+  sz=$(wc -c <"$out_file" | tr -d ' ')
+
+  local in_tok out_tok in_price out_price usd
+  in_tok=$(_ccg_tokens_from_chars "$(wc -c <"$prompt_file" | tr -d ' ')")
+  out_tok=$(_ccg_tokens_from_chars "$sz")
+  in_price=$(_ccg_price "$model" input)
+  out_price=$(_ccg_price "$model" output)
+  usd=$(awk -v ip="$in_price" -v op="$out_price" -v it="$in_tok" -v ot="$out_tok" \
+        'BEGIN { printf "%.6f", (ip * it + op * ot) / 1000000 }')
+  _ccg_log_usage claude "$model" "$in_tok" "$out_tok" "$usd" "0"
+
+  [ -n "$cache_key" ] && _ccg_cache_store "$cache_key" "$out_file"
+
+  echo "CCG_CLAUDE_OK=${sz}b"
+  return 0
+}
+
+# Retry wrapper for ccg_claude
+_ccg_claude_retry() {
+  local prompt_file="$1" out_file="$2"
+  local retries="${CCG_CLAUDE_RETRIES:-3}"
+  local attempt=0 ec=0
+  while [ "$attempt" -lt "$retries" ]; do
+    ec=0
+    ccg_claude "$prompt_file" "$out_file" || ec=$?
+    case "$ec" in
+      0)    return 0 ;;
+      2|3)  return "$ec" ;;  # empty prompt / no api key — no retry
+      *)
+        attempt=$((attempt + 1))
+        [ "$attempt" -lt "$retries" ] && sleep $((attempt * 2))
+        ;;
+    esac
+  done
+  return "$ec"
+}
+
+# ============================================================
+# Public: ccg_synthesize
+# Synthesizes two reviewer outputs, classifies as AGREEMENT / DIVERGENCE / BLINDSPOT
+# ============================================================
+ccg_synthesize() {
+  local result_a="$1" result_b="$2" out_file="$3"
+  if [ ! -s "$result_a" ] && [ ! -s "$result_b" ]; then
+    printf 'SYNTHESIS: no reviewer output\n' > "$out_file"; return 0
+  fi
+  if [ ! -s "$result_a" ] || [ ! -s "$result_b" ]; then
+    local present="$result_a"; [ -s "$result_b" ] && present="$result_b"
+    { printf 'SYNTHESIS: single reviewer\n\n'; cat "$present"; } > "$out_file"; return 0
+  fi
+  local pf; pf=$(mktemp -t "ccg.synth.XXXXXXXX" 2>/dev/null) || pf=""
+  if [ -z "$pf" ]; then
+    # Cannot build the synthesis prompt — degrade to a fail-safe verdict rather
+    # than writing to an empty path (ambiguous redirect).
+    printf 'SYNTHESIS: unavailable — cannot create temp file\nVERDICT: discuss\n' > "$out_file" 2>/dev/null
+    return 0
+  fi
+  { printf 'You are a meta-reviewer. Two AI reviewers independently reviewed the same diff.\n'
+    printf 'Output EXACTLY this format:\n\n'
+    printf '1. CLASSIFICATION: AGREEMENT | DIVERGENCE | BLINDSPOT\n'
+    printf '   AGREEMENT=both flag same issues, DIVERGENCE=contradict on severity/correctness, BLINDSPOT=one missed issues the other caught\n'
+    printf '2. KEY FINDINGS: 3-5 highest-signal bullet points\n'
+    printf '3. RECOMMENDATION: one sentence\n'
+    printf '4. VERDICT: merge | fix-required | discuss\n'
+    printf '   Rules:\n'
+    printf '   - merge       = safe to commit (no blocking issues)\n'
+    printf '   - fix-required = critical bug, security issue, or correctness problem — block commit\n'
+    printf '   - discuss     = needs human judgment (reviewers contradict, or non-critical concerns)\n\n'
+    printf '===REVIEWER_A===\n'; cat "$result_a"
+    printf '\n===REVIEWER_B===\n'; cat "$result_b"; printf '\n===END===\n'
+  } > "$pf"
+  # Claude is the preferred synthesizer — best meta-reasoning quality and not
+  # used in Stage 1 by default, so it brings fresh perspective for synthesis.
+  if [ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_API_KEY:-}" ]; then
+    _ccg_claude_retry "$pf" "$out_file" 2>/dev/null || true
+  elif command -v codex >/dev/null 2>&1; then
+    ccg_codex "$pf" "$out_file" 2>/dev/null || true
+  elif [ -n "${BAILIAN_API_KEY:-}" ]; then
+    _ccg_bailian_retry "$pf" "$out_file" 2>/dev/null || true
+  elif [ -n "${GEMINI_API_KEY:-}" ]; then
+    ccg_gemini "$pf" "$out_file" 2>/dev/null || true
+  fi
+  rm -f "$pf"
+  # If every synthesizer failed (empty output), do NOT imply "merge" — that
+  # would let the Stage 2 commit gate silently auto-approve a commit whose
+  # synthesis never actually ran. Emit a human-judgment verdict instead
+  # (fail-safe). It still commits by default, but is honest about the gap and
+  # is blockable via CCG_GATE_DISCUSS=block.
+  [ -s "$out_file" ] || printf 'SYNTHESIS: unavailable — no synthesizer succeeded\nVERDICT: discuss\n' > "$out_file"
 }
 
 # ============================================================
@@ -1446,62 +1979,55 @@ SECURITY RULES:
   { printf '%s\n' "$prompt_header"; cat "$diff_file"; printf '%s\n' "$prompt_footer"; } > "$codex_prompt"
   cp "$codex_prompt" "$gemini_prompt"
 
-  # Run Codex + Gemini in parallel
+  # Run two independent CLI reviewers in parallel: Codex + Gemini — matching
+  # the Stage 1 default provider set. Either one succeeding is enough to extract
+  # a verdict; both empty → fail closed (fix-required).
+  #
+  # NB: invoke providers directly with the gate's own local paths. A previous
+  # revision used `${!CCG_<P>_PROMPT}` indirect expansion, but those env vars are
+  # never set inside the gate (ccg_init's output is not eval'd here) — so no
+  # provider ever ran and the gate fell through to fix-required on every commit.
+  # Indirect `${!var}` expansion is also a "bad substitution" error under zsh,
+  # where ccg.sh is frequently sourced.
+  local pids=() result_files=()
+
   ccg_codex "$codex_prompt" "$codex_result" >/dev/null 2>&1 &
-  local codex_pid=$!
+  pids+=($!)
+  result_files+=("$codex_result")
+
   ccg_gemini "$gemini_prompt" "$gemini_result" >/dev/null 2>&1 &
-  local gemini_pid=$!
-  # P2-R4-50: if user Ctrl+C during the parallel wait, kill the children
-  # rather than leaving codex/gemini CLIs running orphaned in the background.
-  # P1-R5-C: $codex_pid is the BASH SUBSHELL spawned by `ccg_codex &`. Its
-  # child is `timeout codex ...` and its grandchild is `codex` itself.
-  # Killing the subshell alone leaves timeout + codex running (LLM call keeps
-  # billing). pkill -P cascades to the subshell's children; timeout in turn
-  # SIGTERMs codex. Best-effort — pkill is BSD/Linux but missing on minimal
-  # containers, so fall back to plain kill.
+  pids+=($!)
+  result_files+=("$gemini_result")
+
   _ccg_gate_cleanup() {
-    pkill -P "$codex_pid"  2>/dev/null || true
-    pkill -P "$gemini_pid" 2>/dev/null || true
-    kill "$codex_pid" "$gemini_pid" 2>/dev/null || true
-    # Give them a moment, then SIGKILL stragglers
+    for pid in ${pids[@]+"${pids[@]}"}; do
+      pkill -P "$pid" 2>/dev/null || true
+      kill "$pid" 2>/dev/null || true
+    done
     sleep 0.2 2>/dev/null || true
-    pkill -9 -P "$codex_pid"  2>/dev/null || true
-    pkill -9 -P "$gemini_pid" 2>/dev/null || true
-    kill -9 "$codex_pid" "$gemini_pid" 2>/dev/null || true
+    for pid in ${pids[@]+"${pids[@]}"}; do
+      pkill -9 -P "$pid" 2>/dev/null || true
+      kill -9 "$pid" 2>/dev/null || true
+    done
   }
   trap '_ccg_gate_cleanup; trap - INT TERM HUP QUIT; return 130' INT TERM HUP QUIT
-  # P1-R4-48: capture wait exit codes (used by downstream cache + verdict logic).
-  local _codex_ec=0 _gemini_ec=0
-  wait "$codex_pid"; _codex_ec=$?
-  wait "$gemini_pid"; _gemini_ec=$?
+
+  for pid in ${pids[@]+"${pids[@]}"}; do
+    wait "$pid" || true
+  done
   trap - INT TERM HUP QUIT
 
-  # Extract verdict via magic-token sentinel (P0-6).
-  # Scan both reviewers, then apply severity policy:
-  #   any fix-required → fix-required
-  #   no sentinel anywhere → fix-required (fail-closed)
-  #   any reviewer had output but no sentinel → fix-required (suspected injection)
-  #   any reviewer emitted >1 sentinel → fix-required (multiplication attack)
-  #   any discuss → discuss
-  #   all merge → merge
+  # Extract verdict from available results
   local saw_fix=0 saw_discuss=0 saw_merge=0 saw_bad_output=0
   local _f extracted sentinel_count
-  for _f in "$codex_result" "$gemini_result"; do
+  for _f in ${result_files[@]+"${result_files[@]}"}; do
     [ -s "$_f" ] || continue
-    # P1-R4-49 / M1: count sentinels. A legit reviewer emits exactly one.
-    # Two+ sentinels means the model was tricked into "ack + override" —
-    # treat as bad output regardless of which value the regex would pick.
     sentinel_count=$(grep -c -F "$sentinel_open" "$_f" 2>/dev/null | tr -d ' ')
     : "${sentinel_count:=0}"
     if [ "$sentinel_count" -gt 1 ]; then
       saw_bad_output=1
       continue
     fi
-    # P2-D: scan more lines (verbose reviewers can push sentinel past last 10)
-    # P2-E: require at least one char in payload; lowercase before matching
-    # P1-R4-49: use FIRST sentinel (head -1) not last — an attacker echoing
-    # the nonce can only realistically chain another sentinel AFTER the real
-    # one; taking the first locks in the legitimate reviewer's verdict.
     extracted=$(tail -50 "$_f" | grep -F "$sentinel_open" | head -1 | \
                 sed -n "s|.*${sentinel_open}\\([A-Za-z-]\\{1,32\\}\\)${sentinel_close}.*|\\1|p" | \
                 tr '[:upper:]' '[:lower:]')
@@ -1521,7 +2047,7 @@ SECURITY RULES:
   elif [ "$saw_merge" = "1" ]; then
     verdict="merge"
   else
-    # P1-F: both CLIs failed — emit diagnostic before failing closed
+    # P1-F: both reviewers failed — emit diagnostic before failing closed.
     if ! [ -s "$codex_result" ] && ! [ -s "$gemini_result" ]; then
       printf '[ccg gate] ERROR: both reviewers produced no output.\n' >&2
       if ! command -v codex >/dev/null 2>&1; then
@@ -1972,6 +2498,14 @@ _ccg_parse_conflicts() {
 # ============================================================
 _ccg_resolve_one_conflict() {
   local file="$1" idx="$2" ours_f="$3" theirs_f="$4" workdir="$5"
+
+  # Bug #S3-5 fix: validate inputs exist before reading
+  if [ ! -f "$ours_f" ] || [ ! -f "$theirs_f" ]; then
+    printf '[ccg merge] ERROR: conflict files missing for %s#%s\n' "$file" "$idx" >&2
+    printf 'NEEDS_HUMAN_DECISION\n'
+    return 1
+  fi
+
   local ours theirs
   ours=$(cat "$ours_f")
   theirs=$(cat "$theirs_f")
@@ -2012,6 +2546,73 @@ CRITICAL RULES:
   local gprompt="$workdir/conflict_${idx}_gemini.prompt"
   local cresult="$workdir/conflict_${idx}_codex.result"
   local gresult="$workdir/conflict_${idx}_gemini.result"
+  local bprompt="$workdir/conflict_${idx}_bailian.prompt"
+  local bresult="$workdir/conflict_${idx}_bailian.result"
+  printf '%s\n' "$prompt" > "$bprompt"
+
+  # ── Helper: validate resolved content (Bug #S3-3, #S3-4) ──
+  _ccg_validate_resolution() {
+    local result_file="$1"
+    [ -s "$result_file" ] || return 1
+    # Reject if marked NEEDS_HUMAN_DECISION anywhere
+    grep -q 'NEEDS_HUMAN_DECISION' "$result_file" && return 1
+    # Reject markdown code fences
+    grep -qE '^```' "$result_file" && return 1
+    # Reject any conflict marker hallucination
+    grep -qE '^(<{7}|={7}|>{7}|\|{7})' "$result_file" && return 1
+    # Reject if content (excluding CONFIDENCE line) is empty/whitespace-only
+    local stripped
+    stripped=$(grep -v '^[[:space:]]*CONFIDENCE:' "$result_file" | tr -d '[:space:]' | head -c 1)
+    [ -n "$stripped" ] || return 1
+    return 0
+  }
+
+  # ── Bailian primary path (Bug #S3-2: with cleanup trap) ──
+  if [ -n "${BAILIAN_API_KEY:-}" ]; then
+    _ccg_bailian_retry "$bprompt" "$bresult" >/dev/null 2>&1 &
+    local bpid=$!
+    _ccg_resolve_bailian_cleanup() {
+      pkill -P "$bpid" 2>/dev/null || true
+      kill "$bpid" 2>/dev/null || true
+      sleep 0.2 2>/dev/null || true
+      pkill -9 -P "$bpid" 2>/dev/null || true
+      kill -9 "$bpid" 2>/dev/null || true
+    }
+    trap '_ccg_resolve_bailian_cleanup; trap - INT TERM HUP QUIT; return 130' INT TERM HUP QUIT
+    wait "$bpid" 2>/dev/null || true
+    trap - INT TERM HUP QUIT
+
+    if _ccg_validate_resolution "$bresult"; then
+      cat "$bresult"
+      return 0
+    fi
+  fi
+
+  # ── Claude secondary path (direct Anthropic API) ──
+  if [ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_API_KEY:-}" ]; then
+    local clprompt="$workdir/conflict_${idx}_claude.prompt"
+    local clresult="$workdir/conflict_${idx}_claude.result"
+    printf '%s\n' "$prompt" > "$clprompt"
+    _ccg_claude_retry "$clprompt" "$clresult" >/dev/null 2>&1 &
+    local clpid=$!
+    _ccg_resolve_claude_cleanup() {
+      pkill -P "$clpid" 2>/dev/null || true
+      kill "$clpid" 2>/dev/null || true
+      sleep 0.2 2>/dev/null || true
+      pkill -9 -P "$clpid" 2>/dev/null || true
+      kill -9 "$clpid" 2>/dev/null || true
+    }
+    trap '_ccg_resolve_claude_cleanup; trap - INT TERM HUP QUIT; return 130' INT TERM HUP QUIT
+    wait "$clpid" 2>/dev/null || true
+    trap - INT TERM HUP QUIT
+
+    if _ccg_validate_resolution "$clresult"; then
+      cat "$clresult"
+      return 0
+    fi
+  fi
+
+  # ── Fallback: Codex + Gemini in parallel ─────────────────
   printf '%s\n' "$prompt" > "$cprompt"
   printf '%s\n' "$prompt" > "$gprompt"
 
@@ -2019,9 +2620,6 @@ CRITICAL RULES:
   local cpid=$!
   ccg_gemini "$gprompt" "$gresult" >/dev/null 2>&1 &
   local gpid=$!
-  # P1-R5-D: cascade cleanup if user Ctrl+C during AI conflict resolution.
-  # Without this, codex/gemini CLIs orphan to init and keep billing. Same
-  # kill-tree pattern as ccg_precommit_gate (R5-C).
   _ccg_resolve_cleanup() {
     pkill -P "$cpid" 2>/dev/null || true
     pkill -P "$gpid" 2>/dev/null || true
@@ -2032,49 +2630,33 @@ CRITICAL RULES:
     kill -9 "$cpid" "$gpid" 2>/dev/null || true
   }
   trap '_ccg_resolve_cleanup; trap - INT TERM HUP QUIT; return 130' INT TERM HUP QUIT
-  # P1-R4-48: capture exit codes for diagnostics (used by fallback logic below)
   local _cec=0 _gec=0
   wait "$cpid"; _cec=$?
   wait "$gpid"; _gec=$?
   trap - INT TERM HUP QUIT
 
-  # If either says NEEDS_HUMAN_DECISION, escalate
-  local _rf
-  for _rf in "$cresult" "$gresult"; do
-    [ -s "$_rf" ] || continue
-    if grep -q 'NEEDS_HUMAN_DECISION' "$_rf" 2>/dev/null; then
-      printf 'NEEDS_HUMAN_DECISION\n'
-      return 1
+  # Codex is the authoritative reviewer in this tier. If it ran and produced
+  # output, trust its verdict: a valid resolution is used, but an INVALID one
+  # (e.g. hallucinated conflict markers, markdown fences, or an explicit
+  # NEEDS_HUMAN_DECISION) escalates to a human rather than silently substituting
+  # Gemini's answer — which could drop one side's code. We only fall back to
+  # Gemini when Codex produced no output at all (missing CLI, timeout, crash).
+  if [ "$_cec" = "0" ] && [ -s "$cresult" ]; then
+    if _ccg_validate_resolution "$cresult"; then
+      cat "$cresult"
+      return 0
     fi
-  done
-
-  # Prefer Codex result; fall back to Gemini; fall back to keeping both
-  local resolved=""
-  if [ -s "$cresult" ] && [ "$_cec" = "0" ]; then
-    resolved=$(cat "$cresult")
-  elif [ -s "$gresult" ] && [ "$_gec" = "0" ]; then
-    resolved=$(cat "$gresult")
-  else
-    # Safe fallback: preserve original conflict markers for human review
     printf 'NEEDS_HUMAN_DECISION\n'
     return 1
   fi
-
-  # P0-B: if AI wrapped output in markdown fences, escalate rather than
-  # writing literal ``` into source files.
-  if printf '%s\n' "$resolved" | grep -qE '^```'; then
-    printf 'NEEDS_HUMAN_DECISION\n'
-    return 1
-  fi
-  # P1-R4-42: AI output may echo conflict markers (jailbreak or hallucination).
-  # Writing them into the source file would re-create or compound a conflict.
-  if printf '%s\n' "$resolved" | grep -qE '^(<{7}|={7}|>{7}|\|{7})'; then
-    printf 'NEEDS_HUMAN_DECISION\n'
-    return 1
+  if [ "$_gec" = "0" ] && _ccg_validate_resolution "$gresult"; then
+    cat "$gresult"
+    return 0
   fi
 
-  printf '%s\n' "$resolved"
-  return 0
+  # All failed — escalate
+  printf 'NEEDS_HUMAN_DECISION\n'
+  return 1
 }
 
 # ============================================================
@@ -2386,6 +2968,19 @@ ccg_merge() {
     return 1
   fi
 
+  # Bug #S3-17 fix: enforce max conflict limit to prevent runaway cost
+  local max_conflicts="${CCG_MERGE_MAX_CONFLICTS:-50}"
+  if [ "$conflict_count" -gt "$max_conflicts" ]; then
+    printf '\n⚠️  %d conflict files exceeds limit %d (CCG_MERGE_MAX_CONFLICTS).\n' "$conflict_count" "$max_conflicts" >&2
+    printf 'Aborting merge to prevent runaway cost. Resolve manually or raise the limit.\n' >&2
+    git merge --abort 2>/dev/null || true
+    git checkout "$source_branch" -q 2>/dev/null || true
+    git branch -D "$backup_branch" 2>/dev/null || true
+    ccg_cleanup "$workdir" >/dev/null
+    trap - INT TERM HUP QUIT
+    return 1
+  fi
+
   # ── AI resolution loop ───────────────────────────────────
   # OURS = target branch (the base we merge into), THEIRS = your feature work
   # P1-P: use literal newlines (ANSI-C quoting) instead of \n escapes so
@@ -2400,12 +2995,20 @@ ccg_merge() {
   local resolved_total=0
   local needs_human_total=0
 
+  # Bug #S3-13 fix: progress tracking
+  local file_index=0
+  printf '\n🤖 AI resolving %d conflict file(s)...\n\n' "$conflict_count"
+
   local resolutions_dir="$workdir/resolutions"
   mkdir -p "$resolutions_dir"
 
   local f
   while IFS= read -r f; do
     [ -z "$f" ] && continue
+
+    # Bug #S3-13 fix: progress per file
+    file_index=$((file_index + 1))
+    printf '  [%d/%d] %s ... ' "$file_index" "$conflict_count" "$f"
 
     # Classify conflict kind BEFORE attempting AI resolution.
     # Only "content" (UU + non-binary) can be safely parsed for <<<<<<< markers.
@@ -2415,6 +3018,7 @@ ccg_merge() {
       needs_human_total=$((needs_human_total + 1))
       needs_human_files="${needs_human_files}${f}[${conflict_kind}] "
       report_lines="${report_lines}| \`${f}\` | — | _(${conflict_kind})_ | _(${conflict_kind})_ | ⚠️ NEEDS HUMAN (${conflict_kind}) | — |${NL}"
+      printf '⚠️  needs human (%s)\n' "$conflict_kind"
       # CRITICAL: do NOT git add — file stays unmerged for human review.
       # The merge will be blocked by needs_human_total > 0 check below.
       continue
@@ -2466,22 +3070,29 @@ EOF
       # Leave file unmerged for human review. The merge will be blocked
       # below by needs_human_total > 0.
       _ccg_apply_resolutions "$f" "$resolutions_dir" >/dev/null 2>&1 || true
+      printf '⚠️  partial (some conflicts need human)\n'
     else
       if ! _ccg_apply_resolutions "$f" "$resolutions_dir"; then
         needs_human_total=$((needs_human_total + 1))
         needs_human_files="${needs_human_files}${f}[apply-failed] "
+        printf '❌ apply failed\n'
         continue
       fi
       # P1-R4-47: propagate git add failure (read-only FS, sparse-checkout, etc.)
       if ! git add -- "$f" 2>/dev/null; then
         needs_human_total=$((needs_human_total + 1))
         needs_human_files="${needs_human_files}${f}[git-add-failed] "
+        printf '❌ git add failed\n'
+      else
+        printf '✅ resolved\n'
       fi
     fi
 
   done <<EOF
 $conflict_files
 EOF
+
+  printf '\n'
 
   # ── Commit (unless dry-run or needs-human blocks) ────────
   if [ "${CCG_MERGE_DRY_RUN:-0}" = "1" ]; then

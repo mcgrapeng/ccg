@@ -1,0 +1,412 @@
+# CCG — 代码分歧检测器
+
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
+[![Bash](https://img.shields.io/badge/Shell-Bash%203.2%2B-green.svg)]()
+[![Models](https://img.shields.io/badge/Models-27%2B-purple.svg)]()
+
+> **身份定位**：不是 review 工具——是**分歧检测器**。
+> 两个独立的模型家族并行评审同一份 diff。
+> 当它们**一致**时，信号弱；当它们**分歧**时，那才是人类该介入的地方。
+
+CCG（Code Convergence/divergence Guardian）是一套多模型代码评审与合并自动化系统。从评审到 push 一条命令搞定，**AI 冲突解决**是其核心竞争力。
+
+**其他语言**：[English](../README.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
+
+---
+
+## 目录
+
+- [为什么用 CCG](#为什么用-ccg)
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [四阶段能力集](#四阶段能力集)
+- [模型策略](#模型策略)
+- [配置](#配置)
+- [架构](#架构)
+- [文档](#文档)
+
+---
+
+## 为什么用 CCG
+
+| 痛点 | CCG 的解法 |
+|---|---|
+| 单模型评审有盲区 | 两个独立模型家族并行评审——浮现它们**不一致**的地方 |
+| 一刀切的模型既浪费又不够用 | 风险感知自动路由：低风险用便宜的，关键代码用顶级的 |
+| Merge 冲突繁琐且容易出错 | **AI 冲突解决（Bailian 主力）**——多重防护，绝不静默丢代码 |
+| Push 决策缺少上下文 | Stage 4 在 push 前生成**图形化质量评分卡** |
+| 评审无法复用 | JSONL ledger 记录每次评审，按路径可查 |
+
+---
+
+## 安装
+
+```bash
+# 克隆 & 安装
+git clone https://github.com/your-org/ccg.git
+cd ccg
+ln -s "$(pwd)/ccg" /usr/local/bin/ccg
+
+# 验证
+ccg config
+ccg models
+```
+
+**依赖：**
+- `bash 3.2+`、`git`、`curl`、`jq`
+- 至少一个：`codex` CLI、`gemini` CLI 或 `BAILIAN_API_KEY`
+
+---
+
+## 快速开始
+
+```bash
+# 1. 评审当前改动
+ccg review
+
+# 2. 评审门禁通过后自动 commit
+ccg commit "feat: 添加用户认证"
+
+# 3. AI 冲突解决合并分支
+ccg merge main
+
+# 4. Push 前图形化分析 & 决策
+ccg push origin main
+
+# 辅助命令
+ccg config           # 显示当前配置
+ccg models           # 列出所有可用模型
+```
+
+---
+
+## 四阶段能力集
+
+CCG 围绕四个阶段构建，每个阶段都有明确的目的、模型策略和安全保证。
+
+### Stage 1 — 代码评审（`ccg review`）
+
+**目的**：发现 diff 中的 bug、安全问题和质量问题。
+
+**模型策略**：
+- **2 个模型并行**（默认 Codex + Bailian）
+- 用户可通过 `CCG_PROVIDERS` 覆盖
+- 模型由当前 `CCG_MODE` 决定（详见[模型策略](#模型策略)）
+
+**输出**：合成结果分类为：
+- `AGREEMENT` — 两个评审都标记相同问题（高置信度）
+- `DIVERGENCE` — 评审者意见冲突（需要人类判断）
+- `BLINDSPOT` — 一方漏掉了另一方发现的问题（最高价值）
+
+**流水线**：
+```
+git diff → 风险评分 → 模式选择
+   → 并行：[Codex 评审 + Bailian 评审]
+   → 合成 → AGREEMENT | DIVERGENCE | BLINDSPOT
+```
+
+**安全保证**：
+- Prompt injection 防御（不可信内容标记、每次调用独立 nonce）
+- 大 diff 警告（>200KB 可能超过 context）
+- Cleanup trap（Ctrl+C 杀子进程）
+- 部分失败处理（1/2 成功 → 继续并警告）
+
+---
+
+### Stage 2 — 自动提交（`ccg commit`）
+
+**目的**：通过自动化提交门禁阻止不良代码进入 git 历史。
+
+**模型策略**：
+- **2 个模型并行**（默认 Codex + Bailian）
+- 每个输出 verdict 哨兵：`merge` / `fix-required` / `discuss`
+- 严重度策略：任一 `fix-required` → 阻止
+
+**Verdicts**：
+| Verdict | 行为 |
+|---|---|
+| `merge` | ✅ 允许 commit |
+| `discuss` | ⚠️ 默认允许（可设 `CCG_GATE_DISCUSS=block` 阻止）|
+| `fix-required` | ❌ 阻止 commit |
+
+**流水线**：
+```
+git diff (staged) → 风险评分 → 模式选择
+   → 并行：[模型 A verdict + 模型 B verdict]
+   → 严重度策略 → 允许 | 阻止
+```
+
+**安全保证**：
+- 每次调用独立 nonce 防止 verdict 伪造
+- 空输出/多哨兵/无哨兵 → 失败关闭（fail-closed）
+- diff 内容显式标记为不可信
+
+---
+
+### Stage 3 — AI 合并（`ccg merge <target>`）⭐ **核心竞争力**
+
+**目的**：专业、可靠地解决合并冲突。
+
+**模型策略**：
+- **Bailian 是主要解决器**（代码可靠性最高）
+- 如果 Bailian 失败，降级到 **Codex + Gemini 并行**
+- 全部失败 → `NEEDS_HUMAN_DECISION`
+
+**冲突分类**（只有 `content` 进入 AI）：
+| 类型 | 处理方式 |
+|---|---|
+| `content` | AI 解决 |
+| `binary` | 转人工 |
+| `submodule` | 转人工 |
+| `symlink` | 转人工 |
+| `delete_modify` | 转人工 |
+| `both_deleted` | 转人工 |
+| `added_one_side` | 转人工 |
+| `both_added` | 转人工 |
+
+**流水线**：
+```
+checkout target → 备份分支 → git merge --no-commit
+  ↓ (每个冲突文件)
+  分类 → 解析 <<<<<<< 块
+  → Bailian 解决
+    ↓ (失败)
+    Codex + Gemini 并行
+    ↓ (都失败)
+    NEEDS_HUMAN_DECISION
+  → 校验（无 markdown fence、无冲突标记、内容非空）
+  → 原子文件重写（mktemp + mv、保留权限）
+  → git add（如解决）
+  ↓
+  commit（如全部干净）| 不 commit（如有需人工）
+```
+
+**安全保证**：
+- 合并前创建备份分支（`ccg-backup/<target>-<时间戳>-<pid>-<rand>`）
+- 工作树不干净、detached HEAD、操作中等 → 拒绝
+- 远端分叉 → 拒绝
+- 每个冲突独立 nonce 防止 OURS/THEIRS 注入
+- 校验解决内容（无 markdown fence、无冲突标记、内容非空）
+- 原子文件替换（`mktemp` + `mv`）
+- 保留文件权限，拒绝写入 symlink
+- **绝不静默丢代码** —— 失败转 NEEDS_HUMAN
+- 实时进度：`[3/12] src/auth.js ... ✅ 已解决`
+- 限制最大冲突数（默认 50，可通过 `CCG_MERGE_MAX_CONFLICTS` 覆盖）
+
+---
+
+### Stage 4 — Push 前分析（`ccg push <remote> <branch>`）
+
+**目的**：在 push 前给用户一份全面、图形化的报告——让用户做出明智决定。
+
+**模型策略**：使用 Bailian LLM 做风险评分（失败时降级到规则引擎）。
+
+**报告内容**：
+```
+╔══════════════════════════════════════════════════════════╗
+║          🚀  CCG Pre-Push Analysis Report  🚀            ║
+╚══════════════════════════════════════════════════════════╝
+
+  📍 分支 / 远程 / HEAD / 作者 / 时间
+
+  ┌─ 提交摘要 ─────────────────────────────────────────────┐
+  │  Ahead: N 个 / Behind: M 个
+  └────────────────────────────────────────────────────────┘
+
+  📝 带质量标记的提交（✓ 规范提交 / ⚠ WIP）
+
+  ┌─ 代码变更 ─────────────────────────────────────────────┐
+  │  文件 / 新增 / 删除 + 视觉条形图
+  └────────────────────────────────────────────────────────┘
+
+  📂 文件分类：💻 代码 / 🧪 测试 / 📖 文档 / ⚙️ 配置
+
+  🚨 检测到敏感文件（.env、*.pem、credentials 等）
+
+  ┌─ 风险评估 ─────────────────────────────────────────────┐
+  │  评分：🔴 CRITICAL (85) — auth + payment
+  │  [████████████████████████████████████████████]
+  └────────────────────────────────────────────────────────┘
+
+  📊 Push 质量评分卡：
+     ✅ 规范的 commit message
+     ✅ 代码变更伴随测试
+     ❌ 包含敏感文件
+     ✅ 与远端同步
+     ⚠️  高风险——需谨慎审查
+
+  ┌─ 推荐 ─────────────────────────────────────────────────┐
+  │  🔴 NOT RECOMMENDED (3/5 通过)
+  └────────────────────────────────────────────────────────┘
+
+  ┌─ 决策 ─────────────────────────────────────────────────┐
+  │  y — push   |   n — 取消   |   d — 查 diff   |   l — 查 log
+  └────────────────────────────────────────────────────────┘
+```
+
+**质量检查项**：
+1. 规范的 commit message（`feat|fix|chore|...:`）
+2. 代码变更伴随测试文件更新
+3. 不包含敏感文件（`.env`、`*.pem`、`credentials` 等）
+4. 与远端同步（不落后）
+5. 风险等级可接受（<80）
+
+---
+
+## 模型策略
+
+### 三种模式
+
+CCG 基于风险评分自动选择模式，或通过 `CCG_MODE` 强制指定。
+
+| 风险评分 | 自动模式 | 策略 |
+|---|---|---|
+| `< 30` | `cost` | 全部使用便宜的 Bailian 模型 |
+| `30 – 70` | `balanced` | Claude/GPT/Gemini 混合（中级）|
+| `> 70` | `quality` | Claude/GPT/Gemini 顶级 |
+
+### 每种模式的模型
+
+| 模式 | Codex 槽位 | Gemini 槽位 | Bailian 槽位 |
+|---|---|---|---|
+| **`cost`** | `deepseek-v4` | `qwen-3.7` | `kimi-k2.6` |
+| **`balanced`** | `gpt-5.4` | `gemini-2.5-flash` | `claude-sonnet-4-6` |
+| **`quality`** | `gpt-5.5` | `gemini-3.5-flash` | `claude-opus-4-7` |
+
+- **Cost 模式**：全 Bailian 平台国产顶级模型（DeepSeek、Qwen、Kimi、GLM、Mimo）
+- **Balanced 模式**：Claude/GPT/Gemini 中级
+- **Quality 模式**：Claude Opus + GPT-5.5 + Gemini-3.5-flash 顶级
+
+### 各阶段的模型使用
+
+| 阶段 | 用模型？ | 使用哪个 |
+|---|---|---|
+| **Diff Capture** | ❌ | 纯 git 操作 |
+| **Risk Score** | ✅ Bailian LLM | 失败降级到规则引擎 |
+| **Stage 1: 评审** | ✅ 2 个并行 | Codex + Bailian（默认）|
+| **Synthesize** | ✅ 1 个 | Codex > Bailian > Gemini（按可用性）|
+| **Stage 2: 提交门禁** | ✅ 2 个并行 | Codex + Bailian（可配置）|
+| **Stage 3: Merge 冲突** | ✅ **Bailian 优先** | Codex + Gemini 作为降级 |
+| **Stage 4: Push 检查** | ✅ Bailian LLM | 仅用于风险评分 |
+
+### 可用的 Bailian 模型
+
+| 模型 | 等级 | 输入 ¥/1M | 输出 ¥/1M | 说明 |
+|---|---|---|---|---|
+| `qwen-3.7` | quality | 0.30 | 0.90 | 最新 Qwen |
+| `deepseek-v4` | quality | 0.35 | 1.05 | 顶级推理 |
+| `kimi-k2.6` | quality | 0.32 | 0.96 | 长上下文 |
+| `glm-5.1` | quality | 0.28 | 0.84 | 多模态 |
+| `qwen-3.6` | balanced | 0.25 | 0.75 | |
+| `mimo-v2.5-pro` | balanced | 0.22 | 0.66 | |
+| `qwen-3.6-plus` | balanced | 0.20 | 0.60 | |
+| `qwen-3.5-sonnet` | balanced | 0.15 | 0.45 | |
+| `deepseek-v4-lite` | balanced | 0.18 | 0.54 | |
+| `kimi-k2.6-lite` | balanced | 0.16 | 0.48 | |
+| `glm-5.1-lite` | balanced | 0.14 | 0.42 | |
+| `mimo-v2.5` | cost | 0.11 | 0.33 | |
+| `qwen-3.5-haiku` | cost | 0.05 | 0.15 | 最便宜 |
+
+---
+
+## 配置
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `CCG_MODE` | auto | `cost` / `balanced` / `quality` |
+| `CCG_PROVIDERS` | `codex bailian` | Stage 1 的提供商（最多 2 个并行）|
+| `CCG_CODEX_MODEL` | 按模式 | 覆盖 Codex 模型 |
+| `CCG_GEMINI_MODEL` | 按模式 | 覆盖 Gemini 模型 |
+| `CCG_BAILIAN_MODEL` | 按模式 | 覆盖 Bailian 模型 |
+| `BAILIAN_API_KEY` | — | Bailian 必需 |
+| `GEMINI_API_KEY` | — | Gemini 必需 |
+| `CCG_GATE_OFFLINE` | 0 | 设为 1 跳过 Stage 2 评审 |
+| `CCG_GATE_DISCUSS` | allow | 设为 `block` 阻止 discuss verdict |
+| `CCG_MERGE_DRY_RUN` | 0 | Stage 3：解决但不 commit |
+| `CCG_MERGE_NO_AI` | 0 | Stage 3：跳过 AI 解决 |
+| `CCG_MERGE_NO_FETCH` | 0 | Stage 3：跳过远程 fetch |
+| `CCG_MERGE_MAX_CONFLICTS` | 50 | Stage 3：最大冲突文件数 |
+| `CCG_MERGE_KEEP_BACKUP` | 0 | Stage 3：成功后保留备份分支 |
+| `CCG_CACHE_TTL_HOURS` | 24 | Prompt 缓存 TTL |
+| `CCG_KEEP_ARTIFACTS` | 0 | 保留 workdir 用于调试 |
+
+### 使用示例
+
+```bash
+# 关键评审强制 quality 模式
+CCG_MODE=quality ccg review
+
+# 仅使用 Bailian（国内友好）
+CCG_PROVIDERS="bailian" ccg review
+
+# 指定 Bailian 模型
+CCG_BAILIAN_MODEL=deepseek-v4 ccg review
+
+# 干跑 merge（解决但不 commit）
+CCG_MERGE_DRY_RUN=1 ccg merge main
+
+# 跳过 AI merge（仅检测冲突）
+CCG_MERGE_NO_AI=1 ccg merge main
+```
+
+---
+
+## 架构
+
+```
+ccg/
+├── ccg                              # 入口（4 行委托）
+├── ccg.sh                           # 核心引擎（~3000 行）
+│   ├── _ccg_xdg_* / _ccg_vcs_*     # XDG 路径 + git 抽象
+│   ├── ccg_init / ccg_preflight    # workdir 初始化
+│   ├── ccg_diff_capture            # 4 层 diff fallback
+│   ├── ccg_risk_score              # Bailian LLM + 规则引擎
+│   ├── ccg_codex / ccg_gemini      # 提供商执行器
+│   ├── _ccg_bailian_retry          # Bailian 带重试/退避
+│   ├── ccg_synthesize              # AGREEMENT/DIVERGENCE/BLINDSPOT
+│   ├── ccg_precommit_gate          # Stage 2 提交门禁
+│   └── ccg_merge                   # Stage 3 AI 合并
+│       ├── _ccg_classify_conflict  # content/binary/submodule/...
+│       ├── _ccg_parse_conflicts    # 提取 <<<<<<<>>>>>>> 块
+│       ├── _ccg_resolve_one_conflict  # Bailian 优先的 AI 解决
+│       └── _ccg_apply_resolutions  # 原子文件重写
+├── ccg-bailian-models.sh           # 13 个模型的 Bailian 注册表
+├── ccg-bailian-integration.sh      # Bailian API 调用辅助
+├── ccg-multi-provider.sh           # 多提供商编排
+├── ccg-workflow.sh                 # 4 阶段工作流入口
+└── ccg.md                          # Claude Code slash command 规范
+
+docs/
+├── README.zh-CN.md / .ja.md / .ko.md    # 翻译
+├── ARCHITECTURE.md（+ 3 个翻译）        # 架构深度
+├── CHANGELOG.md                         # 版本历史
+└── SVN.md                               # SVN 集成说明
+```
+
+### 存储路径（遵循 XDG 规范）
+
+| 路径 | 内容 |
+|---|---|
+| `$XDG_DATA_HOME/ccg/usage.log` | Token 用量 + 成本日志 |
+| `$XDG_DATA_HOME/ccg/ledger.jsonl` | 按评审的 JSONL ledger |
+| `$XDG_CACHE_HOME/ccg/cache/` | Prompt hash → 结果缓存（24h TTL）|
+| `$XDG_CONFIG_HOME/ccg/` | 用户配置 |
+
+旧版 `~/.ccg/*` 首次运行时自动迁移。
+
+---
+
+## 文档
+
+- [架构深度解析](ARCHITECTURE.zh-CN.md)（[English](ARCHITECTURE.md) · [日本語](ARCHITECTURE.ja.md) · [한국어](ARCHITECTURE.ko.md)）
+- [更新日志](CHANGELOG.md)
+- [SVN 集成](SVN.md)
+- [Slash command 规范](../ccg.md) — Claude Code `/ccg` 命令
+
+---
+
+## 许可证
+
+MIT

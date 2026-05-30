@@ -1,0 +1,15 @@
+#!/bin/bash
+# ccg — standalone CLI entry point for the review → commit → merge → push workflow.
+#
+# Deliberately NOT `set -e`: ccg-workflow.sh and ccg.sh handle errors explicitly
+# and rely on functions returning non-zero as normal control flow (e.g. an empty
+# diff, a blocked verdict, a needs-human merge). Under `set -e` the first such
+# expected non-zero return would abort the whole workflow mid-stage.
+_CCG_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || {
+  echo "ccg: cannot resolve install directory" >&2; exit 1
+}
+# shellcheck source=/dev/null
+if ! . "$_CCG_BIN/ccg-workflow.sh"; then
+  echo "ccg: failed to load $_CCG_BIN/ccg-workflow.sh" >&2; exit 1
+fi
+ccg_workflow "$@"

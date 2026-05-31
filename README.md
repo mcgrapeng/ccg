@@ -1,14 +1,15 @@
-# CCG — Code Divergence Detector
+# CCG — Code Change Guardian
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Bash](https://img.shields.io/badge/Shell-Bash%203.2%2B-green.svg)]()
 [![Models](https://img.shields.io/badge/Models-27%2B-purple.svg)]()
 
-> **Identity**: Not a review tool — a **divergence detector**.
-> Two independent model families review the same diff in parallel.
-> When they **agree**, signal is low. When they **disagree**, that's where humans should focus.
+> **CCG (Code Change Guardian)** is a multi-model code review and Git workflow automation system.
+> Two independent AI model families guard every change across **Review · Commit · Merge · Push** —
+> divergence-aware review, risk-aware model routing, AI merge-conflict resolution, and a pre-push gate,
+> from the working tree to the remote.
 
-CCG (Code Convergence/divergence Guardian) is a multi-model code review and merge automation system. Single-command workflow from review to push, with AI-powered conflict resolution as its core competitive advantage.
+CCG runs two independent models in parallel on each diff and lets Claude synthesize their findings. When they **agree**, signal is low; when they **diverge**, that's where humans should focus. Beyond review it adds a zero-LLM commit gate, AI-powered merge-conflict resolution, and a graphical pre-push scorecard — with a JSONL ledger that makes every review reusable.
 
 **Other languages**: [简体中文](docs/README.zh-CN.md) · [日本語](docs/README.ja.md) · [한국어](docs/README.ko.md)
 
@@ -28,6 +29,8 @@ CCG (Code Convergence/divergence Guardian) is a multi-model code review and merg
 ---
 
 ## Why CCG
+
+CCG guards the entire path from working tree to remote — not just the review step. Each stage targets a specific pain point:
 
 | Problem | CCG's Answer |
 |---|---|

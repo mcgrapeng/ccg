@@ -1,12 +1,17 @@
 {
   "name": "@mcgrapeng/ccg",
   "version": "3.2.0",
-  "description": "Code Divergence Detector for Claude Code — runs Codex + Gemini in parallel on the same diff and surfaces where they disagree.",
+  "description": "Code Change Guardian — a multi-model code review and Git workflow automation CLI for Claude Code: divergence-aware review, risk-aware model routing, AI merge-conflict resolution, and a graphical pre-push gate.",
   "keywords": [
     "claude-code",
     "code-review",
+    "git-workflow",
+    "merge-conflict-resolution",
+    "pre-push",
+    "risk-aware",
     "codex",
     "gemini",
+    "bailian",
     "ai",
     "slash-command",
     "cli",

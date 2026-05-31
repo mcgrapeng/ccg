@@ -14,7 +14,7 @@
 
 ccg는 **Claude Code 내부에서 Codex + Gemini CLI를 호출하기 위한 production-grade 오케스트레이터** 입니다.
 
-"Code Divergence Detector"는 여섯 개의 하위 계층 위에 얹힌 [L7 제품 훅](#l7--분기-합성claude-측)일 뿐입니다 — 각 하위 계층은 slash command에서 LLM CLI로 shell-out할 때 부딪히는 독립적인 실제 엔지니어링 문제를 해결합니다.
+"Code Change Guardian"는 여섯 개의 하위 계층 위에 얹힌 [L7 제품 훅](#l7--분기-합성claude-측)일 뿐입니다 — 각 하위 계층은 slash command에서 LLM CLI로 shell-out할 때 부딪히는 독립적인 실제 엔지니어링 문제를 해결합니다.
 
 > L7을 제거해도 ccg는 여전히 유용합니다 (캐시, 원장, 사용량, 위험 라우팅).
 > L1을 제거하면 ccg는 안전하지 않습니다.
@@ -415,12 +415,41 @@ ccg가 의도적으로 **하지 않는** 것, 그리고 그 이유.
 
 ---
 
+## 3a. 4단계 워크플로우 개요
+
+L7 워크플로우는 bash 함수와 Claude 합성에 걸쳐 있는 4단계 프로세스를 조율하며, `ccg.md`에 완전히 기술되어 있습니다.
+
+**단계 1: ccg_review()** — 이중 모델 분석 및 합성
+- `ccg_codex` + `ccg_gemini`가 병렬 실행 (L1 + L2)
+- 둘 다 동일 diff + `ccg_ledger_context`(L6 컨슈머)에서 취득한 선행 컨텍스트 수신
+- Claude가 출력을 AGREEMENT / DIVERGENCE / BLINDSPOT 섹션으로 합성 (L7)
+
+**단계 2: ccg_commit()** — 제로 LLM 해시 검증 게이트
+- 합성 후, ccg는 리뷰 커밋 메타데이터 검증
+- 순수 bash: 추가 LLM 비용 없음, diff 무결성에 대한 결정론적 검사만
+- `ccg_precommit_gate`를 통해 커밋 게이트 허가 또는 거부 (exit 0/1)
+
+**단계 3: ccg_merge()** — 충돌 해결 (Bailian 주재자)
+- 여러 리뷰어가 존재하는 경우, Bailian을 주재자로 사용하여 그들의 판정 병합
+- L6 원장 기록을 적용하여 동일 코드에 대한 이전 분쟁 식별
+- 통합된 병합 판정 생성
+
+**단계 4: ccg_push_check()** — 그래픽 품질 스코어카드
+- 최종 품질 메트릭 출력: 위험 점수(L5), 합의/분기 비율, 원장 컨텍스트 히트
+- `ccg_persist_report`(L6 컴패니언)를 통해 시각적 요약 카드 렌더링
+- 검색, 공유, PR 첨부를 위해 `.ccg/reports/<sha>_<ts>.md` 아래 저장
+
+모든 4단계는 `ccg.md` slash-command 프로토콜을 통해 호출되며, 사용자가 `/ccg`로 단계 1을 트리거하고 타임아웃 내에 인적 이의가 없으면 단계 2–4가 자동 진행됩니다.
+
+---
+
 ## 10. 파일 맵
 
 ```
 ccg/
 ├── ccg.sh                       → L7 합성 아래 모든 계층 (Bash 코어)
 ├── ccg.md                       → L7 slash-command 프로토콜 (Claude가 읽음, 파싱되지 않음)
+├── ccg-workflow.sh              → 4단계 워크플로우 오케스트레이션: review → commit → merge → push-check
 ├── bin/ccg.js                   → Node CLI wrapper (install / uninstall / doctor / about)
 ├── scripts/install.sh           → 로컬 클론 설치기
 ├── scripts/curl-install.sh      → 원격 한 줄 설치기

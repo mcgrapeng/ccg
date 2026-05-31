@@ -415,12 +415,41 @@ ccg が意図的に**しない**こと、およびその理由。
 
 ---
 
+## 3a. 4 段階ワークフロー概要
+
+L7 ワークフローは bash 関数と Claude 合成にまたがる 4 段階プロセスを統制し、`ccg.md` に完全に記述されています。
+
+**ステージ 1: ccg_review()** — デュアルモデル分析・合成
+- `ccg_codex` + `ccg_gemini` は並列実行（L1 + L2）
+- 両者は同一 diff + `ccg_ledger_context`（L6 コンシューマー）から取得した過去コンテキストを受け取る
+- Claude は出力を AGREEMENT / DIVERGENCE / BLINDSPOT セクションに合成（L7）
+
+**ステージ 2: ccg_commit()** — ゼロ LLM ハッシュ検証ゲート
+- 合成後、ccg は review commit メタデータを検証
+- 純粋 bash: 追加 LLM コスト無し、diff 完全性の決定的チェックのみ
+- `ccg_precommit_gate` を経由して commit ゲートを許可または拒否（exit 0/1）
+
+**ステージ 3: ccg_merge()** — 競合解決（Bailian 主裁判）
+- 複数レビュアーが存在する場合、Bailian を主裁判として使用してそれらの判定をマージ
+- L6 台帳履歴を適用して同一コード上の過去の紛争を特定
+- 統一マージ判定を生成
+
+**ステージ 4: ccg_push_check()** — グラフィカル品質スコアカード
+- 最終品質メトリクスを出力: リスクスコア（L5）、合意/分岐比率、台帳コンテキストヒット
+- `ccg_persist_report`（L6 コンパニオン）経由で視覚的サマリーカードをレンダリング
+- 検索、共有、PR 添付のため `.ccg/reports/<sha>_<ts>.md` に格納
+
+すべての 4 段階は `ccg.md` slash-command プロトコルを経由して呼び出され、ユーザーは `/ccg` でステージ 1 をトリガーし、タイムアウト内に人間の異議がなければステージ 2–4 は自動進行します。
+
+---
+
 ## 10. ファイルマップ
 
 ```
 ccg/
 ├── ccg.sh                       → L7 合成下のすべての層（Bash core）
 ├── ccg.md                       → L7 slash-command プロトコル（Claude が読む、パースされない）
+├── ccg-workflow.sh              → 4 段階ワークフロー オーケストレーション: review → commit → merge → push-check
 ├── bin/ccg.js                   → Node CLI wrapper (install / uninstall / doctor / about)
 ├── scripts/install.sh           → ローカルクローンインストーラ
 ├── scripts/curl-install.sh      → リモートワンライナーインストーラ

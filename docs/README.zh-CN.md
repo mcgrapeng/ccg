@@ -1,14 +1,11 @@
-# CCG — 代码分歧检测器
+# CCG — Code Change Guardian
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
 [![Bash](https://img.shields.io/badge/Shell-Bash%203.2%2B-green.svg)]()
 [![Models](https://img.shields.io/badge/Models-27%2B-purple.svg)]()
 
-> **身份定位**：不是 review 工具——是**分歧检测器**。
-> 两个独立的模型家族并行评审同一份 diff。
-> 当它们**一致**时，信号弱；当它们**分歧**时，那才是人类该介入的地方。
-
-CCG（Code Convergence/divergence Guardian）是一套多模型代码评审与合并自动化系统。从评审到 push 一条命令搞定，**AI 冲突解决**是其核心竞争力。
+> **CCG（Code Change Guardian）** 是一套多模型代码评审与 Git 工作流守护系统。
+> 两个独立的模型家族守护你代码的每次变更，从评审、提交、合并，到推送——完整四阶段工作流。
 
 **其他语言**：[English](../README.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
@@ -115,31 +112,32 @@ git diff → 风险评分 → 模式选择
 
 ### Stage 2 — 自动提交（`ccg commit`）
 
-**目的**：通过自动化提交门禁阻止不良代码进入 git 历史。
+**目的**：只有通过评审的代码才进入 git 历史——**不做额外的 LLM 调用**。
 
-**模型策略**：
-- **2 个模型并行**（默认 Codex + Bailian）
-- 每个输出 verdict 哨兵：`merge` / `fix-required` / `discuss`
-- 严重度策略：任一 `fix-required` → 阻止
+**🚫 Stage 2 零 LLM 调用**——直接复用 Stage 1 的评审结果（synthesis verdict）。
 
-**Verdicts**：
+**模型策略**：无。读取上一步的 `.git/ccg/last-review.json`，逐字节校验 diff 哈希，防止改动后偷偷提交。
+
+**Verdicts**（继承自 Stage 1）：
 | Verdict | 行为 |
 |---|---|
 | `merge` | ✅ 允许 commit |
 | `discuss` | ⚠️ 默认允许（可设 `CCG_GATE_DISCUSS=block` 阻止）|
-| `fix-required` | ❌ 阻止 commit |
+| `fix-required` | ❌ 阻止 commit（要求修复重新评审）|
 
 **流水线**：
 ```
-git diff (staged) → 风险评分 → 模式选择
-   → 并行：[模型 A verdict + 模型 B verdict]
-   → 严重度策略 → 允许 | 阻止
+staged diff → 计算 SHA256 → 对比 last-review.json 中的哈希
+  → 完全匹配 → 读 verdict
+    ✅ merge/discuss → 提交
+    ❌ fix-required → 拒绝（输出上次评审缺陷）
+  → 哈希不匹配 → diff 被篡改，拒绝提交（要求重新评审）
 ```
 
 **安全保证**：
-- 每次调用独立 nonce 防止 verdict 伪造
-- 空输出/多哨兵/无哨兵 → 失败关闭（fail-closed）
-- diff 内容显式标记为不可信
+- 提交网关完全确定性：无 API 调用，无超时，无幻觉
+- diff 篡改检测：哈希不匹配立即拒绝
+- 评审一次，可靠执行：不会因为 API 抖动弱化决策
 
 ---
 
@@ -402,7 +400,6 @@ docs/
 
 - [架构深度解析](ARCHITECTURE.zh-CN.md)（[English](ARCHITECTURE.md) · [日本語](ARCHITECTURE.ja.md) · [한국어](ARCHITECTURE.ko.md)）
 - [更新日志](CHANGELOG.md)
-- [SVN 集成](SVN.md)
 - [Slash command 规范](../ccg.md) — Claude Code `/ccg` 命令
 
 ---

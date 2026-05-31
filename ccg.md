@@ -1,12 +1,10 @@
 ---
-description: Code-divergence detector. Run Codex+Gemini in parallel on a diff, then surface where they DISAGREE (high-signal) vs where they agree. Auto-picks risk-aware mode. Logs each review to ledger. See README.md.
+description: Code Change Guardian — multi-model review, AI commit gate, merge conflict resolution, and pre-push analysis.
 ---
 
-# CCG v3 — 代码分歧检测器
+# CCG v3 — Code Change Guardian
 
-**身份**：不是 review 工具，是**分歧检测器**。两个独立模型家族（Codex/Gemini）评审同一份 diff，Claude 综合时把"两边都说没事 / 两边都说有问题"压成低优先级，把"两边判断不一致的点"放到聚光灯下——这才是真正值得人类介入的地方。
-
-**默认行为**：无参数 → 抓 git diff → 风险打分 → 自动选 mode → 并行评审 → 输出 AGREEMENT / DIVERGENCE / BLINDSPOT 三段 → 落 ledger。
+> **4-Stage Guardian**: Two independent AI model families guard every change across Review · Commit · Merge · Push—surfacing where they disagree, auto-filtering low-risk changes, and providing a pre-push quality gate before code leaves your machine.
 
 ## 三柱设计
 

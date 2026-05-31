@@ -591,7 +591,6 @@ Legacy `~/.ccg/*` auto-migrated on first run.
 - [Architecture deep-dive](docs/ARCHITECTURE.md) ([中文](docs/ARCHITECTURE.zh-CN.md) · [日本語](docs/ARCHITECTURE.ja.md) · [한국어](docs/ARCHITECTURE.ko.md))
 - [Capabilities reference](docs/CAPABILITIES.md) — full feature inventory grounded in the source (中文)
 - [Changelog](docs/CHANGELOG.md)
-- [SVN integration](docs/SVN.md)
 - [Slash command spec](ccg.md) — Claude Code `/ccg` command
 
 ---

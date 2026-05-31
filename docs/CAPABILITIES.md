@@ -2,7 +2,7 @@
 
 > 本文档基于源码实际行为整理(非宣传文案),覆盖 `ccg`、`ccg.sh`、`ccg-workflow.sh`、`ccg-multi-provider.sh`、`ccg-bailian-models.sh`、`ccg-bailian-integration.sh`、`bin/ccg.js`。
 >
-> 一句话定位:CCG 不是"再给一份 review 报告"的工具,而是 **多模型分歧检测器 + 风险感知路由 + 评审记忆 + 全自动 review → commit → AI 合并 → 推送门禁** 的一体化 Git 工作流引擎。
+> 一句话定位:CCG 是 **多模型代码评审守护者 + 风险感知路由 + 评审记忆 + 4 阶段自动化工作流**（review → commit gate → AI merge → push analysis）的一体化 Git 工作流引擎。
 
 运行约束:**Bash 3.2+(macOS 默认)与 zsh 双兼容**;依赖 `git`、`curl`、`jq`;四家模型至少配置其一。
 

@@ -14,7 +14,7 @@
 
 ccg 是 **在 Claude Code 里调用 Codex + Gemini CLI 的生产级编排层**。
 
-"代码分歧检测器"是叠在六个底层之上的 [L7 产品钩子](#l7--分歧综合claude-端)——这六层每一层都独立解决一个真实工程问题，否则你从 slash command 里 shell-out 到 LLM CLI 会立刻撞上。
+"代码变更守护者"是叠在六个底层之上的 [L7 产品钩子](#l7--分歧综合claude-端)——这六层每一层都独立解决一个真实工程问题，否则你从 slash command 里 shell-out 到 LLM CLI 会立刻撞上。
 
 > 删了 L7，ccg 仍然有用（缓存、账本、用量、风险路由）。
 > 删了 L1，ccg 不安全。
@@ -414,12 +414,41 @@ ccg 故意**不**做这些，以及原因。
 
 ---
 
+## 3a. 四阶段工作流概览
+
+L7 工作流协调一个四阶段过程，跨越 bash 函数和 Claude 综合，完整描述见 `ccg.md`：
+
+**阶段 1：ccg_review()** — 双模型分析与综合
+- `ccg_codex` + `ccg_gemini` 并行运行（L1 + L2）
+- 两者都收到相同的 diff + `ccg_ledger_context`（L6 消费者）获取的历史上下文
+- Claude 综合输出为 AGREEMENT / DIVERGENCE / BLINDSPOT 三段（L7）
+
+**阶段 2：ccg_commit()** — 零 LLM 哈希验证门控
+- 综合后，ccg 验证评审 commit 元数据
+- 纯 bash：无额外 LLM 成本，仅 diff 完整性的确定性检查
+- 通过 `ccg_precommit_gate` 允许或拒绝 commit 门控（exit 0/1）
+
+**阶段 3：ccg_merge()** — 冲突解决（百炼主裁）
+- 如果存在多个评审者，使用百炼作为主裁合并他们的裁定
+- 应用 L6 账本历史识别同一代码上的过往争议
+- 产出统一的合并裁定
+
+**阶段 4：ccg_push_check()** — 图形化质量记分卡
+- 输出最终质量指标：风险分数（L5）、一致/分歧比率、账本上下文命中
+- 通过 `ccg_persist_report`（L6 伴生）渲染可视化总结卡
+- 存储在 `.ccg/reports/<sha>_<ts>.md` 以供检索、分享、PR 附加
+
+所有四个阶段都通过 `ccg.md` slash-command 协议调用；用户用 `/ccg` 触发阶段 1，如果超时内无人反对则阶段 2–4 自动推进。
+
+---
+
 ## 10. 文件地图
 
 ```
 ccg/
 ├── ccg.sh                       → L1–L6 全部活在这里（Bash 核心）
 ├── ccg.md                       → L7 slash-command 协议（Claude 读，不被解析）
+├── ccg-workflow.sh              → 四阶段工作流编排：review → commit → merge → push-check
 ├── bin/ccg.js                   → Node CLI wrapper (install / uninstall / doctor / about)
 ├── scripts/install.sh           → 本地 clone 安装器
 ├── scripts/curl-install.sh      → 远程一行装

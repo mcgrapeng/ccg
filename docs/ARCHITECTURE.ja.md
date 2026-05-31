@@ -14,7 +14,7 @@
 
 ccg は **Claude Code 内から Codex + Gemini CLI を呼び出すための production-grade なオーケストレーター** です。
 
-「Code Divergence Detector」は 6 つの下層に乗った [L7 のプロダクトフック](#l7--分岐合成claude-側) に過ぎません — 各下層は、slash command から LLM CLI に shell-out する際に直面する独立した実問題を解決しています。
+「Code Change Guardian」は 6 つの下層に乗った [L7 のプロダクトフック](#l7--分岐合成claude-側) に過ぎません — 各下層は、slash command から LLM CLI に shell-out する際に直面する独立した実問題を解決しています。
 
 > L7 を消しても ccg は依然有用（キャッシュ、台帳、使用量、リスクルーティング）。
 > L1 を消すと ccg は安全でなくなる。

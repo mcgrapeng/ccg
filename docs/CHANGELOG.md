@@ -2,6 +2,59 @@
 
 All notable changes to /ccg.
 
+## [4.0.0] — 2026-05-31
+
+Major repositioning: from "multi-model divergence detector" to **"Code Change Guardian"** — a complete 4-stage Git workflow automation engine. Introduces `ccg-workflow.sh` orchestration and formal Stage 2/3/4 protocols.
+
+### Identity Shift
+**Before (v3):** "Surface where Codex and Gemini disagree — that's your decision point."
+**After (v4):** "Two independent AI model families guard every code change across four stages: Review synthesis → Deterministic commit gate → AI-assisted merge → Pre-push quality analysis."
+
+### Added — Stage 2: Auto Commit (Zero-LLM Gate)
+- **`ccg_commit <message>`** — new protocol layer
+- **🚫 No LLM calls** — reads Stage 1 synthesis from `.git/ccg/last-review.json`
+- Deterministic hash-validation gate: diff modification detected → reject
+- Verdict inheritance: `merge` → allow, `fix-required` → block, `discuss` → configurable
+- Fail-closed: any desync → reject, output prior review findings
+- `CCG_GATE_DISCUSS` env knob: default allow, set to `block` to upgrade to stricter gate
+
+### Added — Stage 3: AI Merge (Conflict Resolution)
+- **`ccg_merge <target>`** — formalized multi-provider conflict resolution
+- Bailian is primary resolver; Codex+Gemini fallback if Bailian fails
+- Conflict classification: only `content`-type conflicts enter AI; others defer to human
+- Backup branch created automatically (`ccg-backup/<target>-<timestamp>`) for safe rollback
+- Per-conflict decision: AI-resolved vs `NEEDS_HUMAN_DECISION` (stays in merge state for manual review)
+
+### Added — Stage 4: Push Analysis (Pre-push Gate)
+- **`ccg_push_check origin main`** — new protocol layer (invoked before `git push`)
+- Graphical quality scorecard: files-changed, risk distribution, CI checks, merge-conflict history
+- Verdict: safe-to-push / hold / escalate-to-human
+- Caches analysis per (commit, target) pair; bypass with `--no-cache`
+
+### Added — `ccg-workflow.sh` Orchestration Engine
+- Central dispatch for all 4 stages: `ccg_review` (L1) → `ccg_commit` (L2) → `ccg_merge` (L3) → `ccg_push_check` (L4)
+- ~36K LOC: durable patterns, error recovery, multi-shell compatibility
+- New public functions: `ccg_workflow <stage> <args>`
+- Backward-compatible with v3 single-stage usage (naked `/ccg` still works)
+
+### Documentation
+- `ccg.md` (slash command protocol) expanded with complete Stage 2/3/4 execution protocols
+- `docs/ARCHITECTURE.md` — new §3a "4-Stage Workflow Architecture" section, updated file map to include `ccg-workflow.sh`
+- `docs/README.md` (English) — updated identity positioning, complete 4-stage walkthrough
+- All 3 language mirrors (`zh-CN`, `ja`, `ko`) — synced with new positioning and full Stage 2-4 descriptions
+- `docs/CAPABILITIES.md` — updated opening to reflect guardian positioning
+
+### Compatibility
+- Full backward compatibility with v3.x single-stage usage
+- New stages are opt-in (user can still call `/ccg review` without touching commit/merge/push stages)
+- Stage 2 (commit gate) can be disabled via `CCG_GATE_OFFLINE=1`
+- Stage 3 (merge) can be dry-run via `CCG_MERGE_DRY_RUN=1`
+
+### Tests
+- 20 new test cases covering all 4 stages + integration scenarios
+- Total: 141 tests, all passing, ~45s runtime
+- E2E workflow test: review → fix → commit → merge → push-check in single session
+
 ## [3.2.0] — 2026-05-24
 
 Closes the L6 loop: the ledger goes from write-only to bidirectional. Each `/ccg` now reads prior reviews on the touched files and injects them into the next prompt — recurring patterns and unresolved `fix-required` items no longer evaporate between sessions. 121-test regression (+10 new); safe drop-in upgrade from 3.1.0.

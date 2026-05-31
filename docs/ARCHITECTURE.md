@@ -12,7 +12,7 @@
 
 ccg is a **production-grade orchestrator for calling Codex + Gemini CLI from inside Claude Code**.
 
-"Code divergence detector" is the [L7 product hook](#l7--divergence-synthesis-claude-side) layered on top of six lower layers — each of which independently solves a real engineering problem you'd otherwise hit when shelling out to LLM CLIs from a slash command.
+"Code Change Guardian" is the [L7 product hook](#l7--divergence-synthesis-claude-side) layered on top of six lower layers — each of which independently solves a real engineering problem you'd otherwise hit when shelling out to LLM CLIs from a slash command.
 
 > If you delete L7, ccg is still useful (cache, ledger, usage, risk routing).
 > If you delete L1, ccg is unsafe.
@@ -442,12 +442,41 @@ If you're prioritizing what to harden first, harden L6 + L4 first.
 
 ---
 
+## 3a. 4-Stage Workflow Overview
+
+The L7 workflow orchestrates a 4-stage process across bash functions and Claude synthesis, fully described in `ccg.md`:
+
+**Stage 1: ccg_review()** — Dual-model analysis & synthesis
+- `ccg_codex` + `ccg_gemini` run in parallel (L1 + L2)
+- Both receive identical diff + prior context from `ccg_ledger_context` (L6 consumer)
+- Claude synthesizes outputs into AGREEMENT / DIVERGENCE / BLINDSPOT sections (L7)
+
+**Stage 2: ccg_commit()** — Zero-LLM hash validation gate
+- After synthesis, ccg validates the review commit metadata
+- Pure bash: no additional LLM cost, only deterministic checks on diff integrity
+- Permits or rejects the commit gate (exit 0/1) via `ccg_precommit_gate`
+
+**Stage 3: ccg_merge()** — Conflict resolution (Bailian primary)
+- If multiple reviewers exist, merge their verdicts using Bailian as primary judge
+- Applies L6 ledger history to identify prior disputes on same code
+- Produces unified merge verdict
+
+**Stage 4: ccg_push_check()** — Graphical quality scorecard
+- Emits final quality metrics: risk score (L5), agreement/divergence ratio, ledger context hits
+- Renders visual summary card via `ccg_persist_report` (L6 companion)
+- Stores under `.ccg/reports/<sha>_<ts>.md` for retrieval, sharing, PR attachment
+
+All 4 stages are invoked via the `ccg.md` slash-command protocol; users trigger Stage 1 with `/ccg`, and Stages 2–4 auto-advance if no human objection is raised within timeout.
+
+---
+
 ## 10. File map
 
 ```
 ccg/
 ├── ccg.sh                  → all 7 layers below the L7 synthesis (Bash core)
 ├── ccg.md                  → L7 slash-command protocol (read by Claude, not parsed)
+├── ccg-workflow.sh         → 4-stage workflow orchestration: review → commit → merge → push-check
 ├── bin/ccg.js              → Node CLI wrapper (install / uninstall / doctor / about)
 ├── scripts/install.sh      → local-clone installer
 ├── scripts/curl-install.sh → remote one-liner installer

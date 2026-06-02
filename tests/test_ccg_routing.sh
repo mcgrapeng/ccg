@@ -61,7 +61,7 @@ _redacts "AWS_SECRET_ACCESS_KEY" "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIbPxRfiCYEXA
 _redacts "generic *_KEY env"     "MY_API_KEY=abcdef0123456789xyz"                       "abcdef0123456789xyz"
 _redacts "PASSWORD"              "PASSWORD=Hunter2Hunter2Hunter2"                        "Hunter2Hunter2Hunter2"
 _redacts "DB_PASS"               "DB_PASS=SuperSecretValue123"                           "SuperSecretValue123"
-_redacts "stripe sk_live_"       "STRIPE=sk_live_REDACTED"              "51AbCdEfGhIjKlMnOpQrStUv"
+_redacts "stripe sk_live_"       "STRIPE=sk_live_REDACTED"                        "REDACTED"
 _redacts "url userinfo"          "postgres://user:SuperSecretDbPass@host/db"            "SuperSecretDbPass"
 _redacts "lowercase token= (8+)" "token=abc123secret456"                                "abc123secret456"
 

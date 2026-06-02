@@ -1,0 +1,9 @@
+top
+<<<<<<< HEAD
+ours line 1
+<<<<<<< example (literal content, not a real marker)
+ours line 2
+=======
+theirs line 1
+>>>>>>> feat
+bottom

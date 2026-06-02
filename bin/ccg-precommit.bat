@@ -10,10 +10,11 @@
 set CCG_SH=%~dp0..\ccg.sh
 
 :: Normalize path separators for bash
-set WC=%1
-set WC=%WC:\=/%
+:: Use double-quotes to safely handle paths with special characters (spaces, single quotes)
+set "WC=%1"
+set "WC=%WC:\=/%"
 
-bash -c "cd '%WC%' && source '%CCG_SH:\=/%' && ccg_precommit_gate"
+bash -c "cd \"%WC%\" && source \"%CCG_SH:\=/%\" && ccg_precommit_gate"
 if %ERRORLEVEL% NEQ 0 (
     echo [ccg gate] Commit blocked. Fix issues reported above.
     exit 1

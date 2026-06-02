@@ -40,7 +40,7 @@ echo "v2" >> "$tmpgit/f.txt"   # modified but NOT staged
 ec=0
 out=$(
   cd "$tmpgit"
-  export PATH="$tmpbin:$PATH" GEMINI_API_KEY=mock CCG_NO_CACHE=1 CCG_NO_REPORT=1
+  export PATH="$tmpbin:$PATH" GEMINI_API_KEY=mock CCG_NO_CACHE=1 CCG_NO_REPORT=1 CCG_MODE=quality
   source "$CCG_SH"
   ccg_autocommit "test commit" 2>&1
 ) || ec=$?
@@ -64,7 +64,7 @@ echo "secret-key=fake-leaked-secret" > "$tmpgit/.env"   # should NOT be committe
 
 (
   cd "$tmpgit"
-  export PATH="$tmpbin:$PATH" GEMINI_API_KEY=mock CCG_NO_CACHE=1 CCG_NO_REPORT=1
+  export PATH="$tmpbin:$PATH" GEMINI_API_KEY=mock CCG_NO_CACHE=1 CCG_NO_REPORT=1 CCG_MODE=quality
   source "$CCG_SH"
   ccg_autocommit "add wanted.txt" 2>&1
 ) >/dev/null
@@ -90,7 +90,7 @@ echo "v1" > "$tmpgit/f.txt" && git -C "$tmpgit" add f.txt && git -C "$tmpgit" co
 echo "new" > "$tmpgit/new.txt"   # unstaged
 (
   cd "$tmpgit"
-  export PATH="$tmpbin:$PATH" GEMINI_API_KEY=mock CCG_NO_CACHE=1 CCG_NO_REPORT=1
+  export PATH="$tmpbin:$PATH" GEMINI_API_KEY=mock CCG_NO_CACHE=1 CCG_NO_REPORT=1 CCG_MODE=quality
   export CCG_AUTOCOMMIT_ALL=1
   source "$CCG_SH"
   ccg_autocommit "all-mode" 2>&1
@@ -130,7 +130,7 @@ sha_before=$(git -C "$tmpgit" rev-parse HEAD)
 ec=0
 (
   cd "$tmpgit"
-  export PATH="$tmpbin:$PATH" GEMINI_API_KEY=mock CCG_NO_CACHE=1 CCG_NO_REPORT=1
+  export PATH="$tmpbin:$PATH" GEMINI_API_KEY=mock CCG_NO_CACHE=1 CCG_NO_REPORT=1 CCG_MODE=quality
   source "$CCG_SH"
   ccg_autocommit "bad code" 2>/dev/null
 ) || ec=$?

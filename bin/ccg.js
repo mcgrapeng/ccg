@@ -20,7 +20,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { spawnSync, execFileSync } = require("node:child_process");
+const { spawnSync } = require("node:child_process");
 
 const PKG_ROOT = path.resolve(__dirname, "..");
 const PKG = require(path.join(PKG_ROOT, "package.json"));
@@ -51,17 +51,19 @@ const head = (m) => console.log(`\n${C.bold}${m}${C.reset}`);
 // commands
 // ──────────────────────────────────────────────────────────────
 function which(cmd) {
-  try {
-    execFileSync(process.platform === "win32" ? "where" : "command", ["-v", cmd], {
-      stdio: "ignore",
-      shell: true,
-    });
-    return true;
-  } catch {
-    // Fallback for systems where `command -v` cannot be located via execFile
-    const r = spawnSync("sh", ["-c", `command -v "${cmd}" >/dev/null 2>&1`]);
+  // Validate cmd to prevent command injection — only allow simple alphanumeric + hyphen/underscore
+  if (!/^[a-zA-Z0-9_-]+$/.test(cmd)) {
+    return false;
+  }
+  if (process.platform === "win32") {
+    const r = spawnSync("where", [cmd], { stdio: "ignore" });
     return r.status === 0;
   }
+  // `command` is a shell builtin (no standalone binary), so run it via `sh -c`.
+  // cmd is validated above and passed as a positional arg — never interpolated
+  // into the script string — so this is injection-safe.
+  const r = spawnSync("sh", ["-c", 'command -v "$1" >/dev/null 2>&1', "--", cmd]);
+  return r.status === 0;
 }
 
 function cmdInstall() {

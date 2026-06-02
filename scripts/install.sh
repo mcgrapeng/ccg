@@ -20,19 +20,35 @@ CCG_SH="$HERE/ccg.sh"
 CCG_MD="$HERE/ccg.md"
 TARGET_DIR="${HOME}/.claude/commands"
 
-[ -r "$CCG_SH" ] || { echo "FATAL: $CCG_SH not found"; exit 2; }
-[ -r "$CCG_MD" ] || { echo "FATAL: $CCG_MD not found"; exit 2; }
+[ -r "$CCG_SH" ] || { echo "FATAL: $CCG_SH not found or not readable" >&2; exit 2; }
+[ -r "$CCG_MD" ] || { echo "FATAL: $CCG_MD not found or not readable" >&2; exit 2; }
 
 echo "→ Installing /ccg to: $TARGET_DIR"
 
 if [ "$DRY" = "0" ]; then
-  mkdir -p "$TARGET_DIR"
-  install -m 0755 "$CCG_SH" "$TARGET_DIR/ccg.sh"
-  install -m 0644 "$CCG_MD" "$TARGET_DIR/ccg.md"
+  if ! mkdir -p "$TARGET_DIR" 2>/dev/null; then
+    echo "❌ Failed to create directory: $TARGET_DIR" >&2
+    echo "   Check permissions or run: mkdir -p $TARGET_DIR" >&2
+    exit 2
+  fi
+  if ! install -m 0755 "$CCG_SH" "$TARGET_DIR/ccg.sh" 2>/dev/null; then
+    echo "❌ Failed to install ccg.sh to $TARGET_DIR/ccg.sh" >&2
+    echo "   Check file permissions and disk space" >&2
+    exit 2
+  fi
+  if ! install -m 0644 "$CCG_MD" "$TARGET_DIR/ccg.md" 2>/dev/null; then
+    echo "❌ Failed to install ccg.md to $TARGET_DIR/ccg.md" >&2
+    echo "   Check file permissions and disk space" >&2
+    exit 2
+  fi
   echo "  ✓ wrote $TARGET_DIR/ccg.sh ($(wc -l <"$CCG_SH" | tr -d ' ') lines)"
   echo "  ✓ wrote $TARGET_DIR/ccg.md"
 else
   echo "  [dry-run] would write: $TARGET_DIR/{ccg.sh,ccg.md}"
+  echo "  [dry-run] skipping preflight checks (no code executed)"
+  echo
+  echo "→ Done (dry-run). Run without --dry-run to install."
+  exit 0
 fi
 
 echo

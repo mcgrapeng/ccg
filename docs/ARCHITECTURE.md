@@ -10,7 +10,7 @@
 
 ## 1. What ccg is
 
-ccg is a **production-grade orchestrator for calling Codex + Gemini CLI from inside Claude Code**.
+ccg is a **production-grade orchestrator for multi-model code review from inside Claude Code**. Stage 1 reviewers are two **different-vendor Bailian models** by default (qwen / glm / mimo / deepseek / kimi / minimax); the premium CLIs (Codex / Gemini / Claude) are enabled only in `quality` mode.
 
 "Code Change Guardian" is the [L7 product hook](#l7--divergence-synthesis-claude-side) layered on top of six lower layers — each of which independently solves a real engineering problem you'd otherwise hit when shelling out to LLM CLIs from a slash command.
 
@@ -238,11 +238,11 @@ Knobs:
 **Solution:** The L7 logic lives in `ccg.md` (the slash-command protocol Claude follows), not in `ccg.sh`. Claude:
 
 1. Sources `ccg.sh`, calls `ccg_init` to allocate a workdir.
-2. Calls `ccg_preflight` to check Codex + Gemini availability.
+2. Calls `ccg_preflight` to check Bailian (and, for quality mode, Codex / Gemini) availability.
 3. Calls `ccg_diff_capture` (L3) to materialize the diff.
 4. Calls `ccg_risk_score` (L5) to choose a mode.
 5. Writes one prompt file. Same prompt, different consumers.
-6. Calls `ccg_codex` + `ccg_gemini` **in parallel** (both Bash tool calls in the same Claude message).
+6. Runs **two different-vendor reviewers in parallel** (both Bash tool calls in the same Claude message): non-quality → two Bailian models (e.g. `ccg_bailian` with qwen + deepseek); quality → two of `ccg_codex` / `ccg_gemini` / `ccg_claude`.
 7. Calls `ccg_actual` (L4) to log real cost.
 8. **Synthesizes** the two `[FINDING]`-formatted outputs into AGREEMENT / DIVERGENCE / BLINDSPOT sections — this synthesis happens in Claude's head, not in code.
 9. Calls `ccg_ledger_record` (L6) with the synthesis excerpt.

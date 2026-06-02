@@ -10,43 +10,58 @@ description: Code Change Guardian — multi-model review, AI commit gate, merge 
 
 | 柱 | 解决的问题 | 实现 |
 |---|---|---|
-| Divergence Engine | 单源 review 看不到"自己看不到的盲区" | 同 prompt 双投喂 + Claude 综合时强调分歧 |
+| Divergence Engine | 单源 review 看不到"自己看不到的盲区" | 同 prompt 投喂两个**不同厂商**模型，综合时强调分歧 |
 | Risk-Aware Routing | 用户不应该手选 cost/balanced/quality | `ccg_risk_score` 基于路径/内容/规模规则打分自动选 |
 | Review Ledger | 这次评审的判断下次没法复用 | 每次评审追加 JSONL，按路径可查历史 |
+
+> **模型策略**：各阶段主力是 BAILIAN 平台**两个不同厂商**的顶级模型（厂商限定
+> `qwen / glm / mimo / deepseek / kimi / minimax`）。`codex / gemini / claude`
+> **仅在质量优先（`CCG_MODE=quality`）时启用**——此时 Stage 1 在三者中任选 2 个，
+> 剩下一个作为 synthesizer。风险评分会自动路由：低/中风险走便宜的 Bailian 对，
+> 高风险自动进入 quality 解锁 premium 三件套。
 
 ## 配置 (环境变量)
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `CCG_MODE` | `auto` | `auto` (按 risk score 决) / `cost` / `balanced` / `quality` |
-| `CCG_CODEX_MODEL` | — | 显式 codex 模型（优先于 CCG_MODE） |
-| `CCG_GEMINI_MODEL` | — | 显式 gemini 模型 |
+| `CCG_PROVIDERS` | (按 mode) | Stage 1 provider 列表，最多 2 个。非 quality 默认两个不同厂商 Bailian；quality 默认 `codex gemini`。支持 `bailian:qwen-3.6 bailian:deepseek-v4` 语法 |
+| `CCG_ALLOW_SAME_VENDOR` | `0` | `1` = 允许 Stage 1 两个 slot 同厂商（默认禁止，破坏 divergence） |
+| `BAILIAN_API_KEY` | — | Bailian 主力模型必需 |
+| `CCG_BAILIAN_MODEL` | — | 显式 bailian 模型（优先于 CCG_MODE） |
+| `CCG_CODEX_MODEL` | — | 显式 codex 模型（仅 quality 生效） |
+| `CCG_GEMINI_MODEL` | — | 显式 gemini 模型（仅 quality 生效） |
+| `CCG_SYNTH_PROVIDER` | (按 mode) | 覆盖 synthesizer：quality 默认用三件套中未上场的那个（缺省 claude），非 quality 用 bailian |
+| `CCG_RISK_LLM` | `0` | `1` = 用 LLM 做风险评分（需 BAILIAN_API_KEY）；默认纯规则、确定性、不花钱 |
 | `CCG_CODEX_TIMEOUT` | `240` | Codex 超时秒数 |
 | `CCG_GEMINI_TIMEOUT` | `120` | Gemini 超时秒数 |
 | `CCG_NO_CACHE` | `0` | `1` = 跳过 24h prompt-hash 缓存 |
 | `CCG_CACHE_TTL_HOURS` | `24` | 缓存 TTL |
-| `CCG_MAX_PROMPT_KB` | `100` | 防止把整个 repo 塞进 prompt |
+| `CCG_MAX_PROMPT_KB` | `100` | 防止把整个 repo 塞进 prompt（超过此值各 provider 直接拒绝） |
 | `CCG_KEEP_ARTIFACTS` | `0` | `1` = 保留临时文件 |
 | `CCG_LEDGER_LOG` | `$XDG_DATA_HOME/ccg/ledger.jsonl` | 评审历史落盘位置（fallback `~/.local/share/ccg/`，自动迁移老路径 `~/.ccg/`） |
 | `CCG_NO_REPORT` | `0` | `1` = 跳过 `.ccg/reports/<sha>_<ts>.md` 持久化 |
 | `CCG_REPORT_DIR` | `<repo>/.ccg/reports` | 改写报告目录（默认 git repo 根下的 `.ccg/reports/`） |
-| `CCG_NO_HISTORY` | `0` | `1` = 跳过把过去同路径的评审摘要注入 prompt（步骤 2.5） |
+| `CCG_NO_HISTORY` | `0` | `1` = 跳过把过去同路径的评审摘要注入 prompt |
 | `CCG_HISTORY_MAX` | `3` | 注入 prompt 的历史评审条数上限 |
 
 ### Mode → 默认模型映射
 
-| Mode | Codex | Gemini |
+| Mode | Stage 1（主力，两个不同厂商） | Synthesizer |
 |---|---|---|
-| `cost` | deepseek-v4 | qwen-3.7 |
-| `balanced` (默认) | gpt-5.4 | gemini-2.5-flash |
-| `quality` | gpt-5.5 | gemini-3.5-flash |
+| `cost` | `qwen-3.5-haiku` + `deepseek-v4-lite`（Bailian） | bailian |
+| `balanced` (默认) | `qwen-3.6` + `deepseek-v4`（Bailian） | bailian |
+| `quality` | `codex` + `gemini`（三件套任选 2） | 剩下那个（缺省 `claude`） |
 
-> ⚠️ 第三方代理若不支持上述模型名，会 5xx/404。用 `CCG_CODEX_MODEL`/`CCG_GEMINI_MODEL` 显式指定代理实际支持的型号。
+> ⚠️ codex/gemini/claude 仅在 `quality` 模式启用。非 quality 模式即使在
+> `CCG_PROVIDERS` 里写了它们，也会被跳过。
+> ⚠️ 第三方代理若不支持上述模型名，会 5xx/404。用 `CCG_*_MODEL` 显式指定代理实际支持的型号。
 
 ## 前置依赖
 
-- `npm i -g @openai/codex` `npm i -g @google/gemini-cli`
-- `export GEMINI_API_KEY=...` 放在 `~/.zshenv`（非交互 shell 也能读到）
+- **Bailian（主力，非 quality 模式必需）**：`export BAILIAN_API_KEY=...`
+- **premium（仅 quality 模式）**：`npm i -g @openai/codex`、`npm i -g @google/gemini-cli` + `export GEMINI_API_KEY=...`
+- API key 放在 `~/.zshenv`（非交互 shell 也能读到）
 
 ## 执行协议（Claude 严格按以下步骤）
 
@@ -65,9 +80,10 @@ ccg_init
 source ~/.claude/commands/ccg.sh
 ccg_preflight
 ```
-- `CCG_PREFLIGHT_CODEX=missing` → 说明缺哪个 CLI + 安装命令
-- `CCG_PREFLIGHT_GEMINI=no-api-key` → 标注 Gemini 不可用，跳过
-- 两者都不可用 → Claude 独立回答
+- `CCG_PREFLIGHT_BAILIAN=ok` → 主力可用（非 quality 模式用两个不同厂商 Bailian 模型）
+- `CCG_PREFLIGHT_BAILIAN=no-api-key` → 非 quality 模式不可用；提示设 `BAILIAN_API_KEY`
+- `CCG_PREFLIGHT_CODEX` / `CCG_PREFLIGHT_GEMINI` → 仅 **quality 模式**用得到（premium 三件套）
+- 主力与 premium 都不可用 → Claude 独立回答
 
 ### 步骤 2. 确定任务输入（两种模式）
 
@@ -104,7 +120,7 @@ ccg_ledger_context "$CCG_DIR/diff.txt"
 - `CCG_HISTORY_SKIPPED=<no-ledger|no-diff|disabled|no-paths-in-diff>` → 跳过即可，不报错
 - `CCG_HISTORY_FAIL=...` → 临时文件写不进；忽略并继续（这一步是增强信号，不是必需）
 
-> 设计立场：L6 ledger 不再是日记本——每次评审都把"过去对同一文件的判断"作为先验喂给 Codex/Gemini。recurring patterns、未解决的 fix-required 都进入第一现场。环境变量 `CCG_NO_HISTORY=1` 可关闭；`CCG_HISTORY_MAX` 改条数（默认 3）。
+> 设计立场：L6 ledger 不再是日记本——每次评审都把"过去对同一文件的判断"作为先验喂给两个评审模型。recurring patterns、未解决的 fix-required 都进入第一现场。环境变量 `CCG_NO_HISTORY=1` 可关闭；`CCG_HISTORY_MAX` 改条数（默认 3）。
 
 ### 步骤 3. 风险打分 + 自动选 mode（仅 B 模式）
 
@@ -120,7 +136,20 @@ ccg_risk_score "$CCG_DIR/diff.txt" | tee "$CCG_DIR/risk.txt"
 
 > 设计立场：路径/内容/规模规则比 LLM 判断更**可解释、零成本、可改**。社区贡献者可以直接 PR 改权重。
 
-### 步骤 4. 写 prompt（结构化输出协议）
+### 步骤 4. 选择两个评审模型 + 写 prompt（结构化输出协议）
+
+**先按 `CCG_MODE` 选定两个 Stage 1 评审模型（必须是不同厂商）：**
+
+- **非 quality（cost / balanced）→ 两个不同厂商的 Bailian 主力模型**：
+
+  ```bash
+  CCG_DIR=<字面路径>
+  source ~/.claude/commands/ccg.sh
+  _ccg_resolve_bailian_pair "${CCG_MODE:-balanced}"   # 输出两行，如：qwen-3.6 / deepseek-v4
+  ```
+  第 1 行 = Reviewer A 的模型，第 2 行 = Reviewer B 的模型（厂商天然不同）。
+
+- **quality → premium 三件套（codex / gemini / claude）任选 2 个**作为 Reviewer A/B，剩下那个留给步骤 7 的 synthesis（缺省 claude）。默认 A=codex、B=gemini。
 
 **核心改动**：要求两端都按下面格式输出（便于 Claude 后续做对齐和分歧检测）。
 
@@ -153,53 +182,73 @@ detail: <2-4 行解释，必须可独立读懂>
 <贴入 diff 内容>
 ````
 
-用 **Write tool**（不是 echo）写入：
-- `<CCG_DIR>/codex.prompt`
-- `<CCG_DIR>/gemini.prompt`
+用 **Write tool**（不是 echo）写入两份**完全相同**的 prompt（含 history 段——两个 reviewer 看相同的过往）：
+- `<CCG_DIR>/slot1.prompt`
+- `<CCG_DIR>/slot2.prompt`
 
-两份 prompt 内容**完全相同**（包括 history 段——两个 reviewer 看相同的过往）。让两个独立大脑产生差异——这正是分歧检测的来源。
-
-### 步骤 5. 并行调用 CLI（单消息两个 Bash 调用）
+### 步骤 5. 并行调用两个评审模型（单消息两个 Bash 调用）
 
 helper 内部：检查大小 → 查缓存（命中则 $0）→ 真打 API → 落 cache + usage.log。
-
-**Codex** (timeout 260000)：
-```bash
-CCG_DIR=<字面路径>
-source ~/.claude/commands/ccg.sh
-ccg_codex "$CCG_DIR/codex.prompt" "$CCG_DIR/codex.result"
-echo "---ANSWER---"
-cat "$CCG_DIR/codex.result"
-```
-
-**Gemini** (timeout 140000)：
-```bash
-CCG_DIR=<字面路径>
-source ~/.claude/commands/ccg.sh
-ccg_gemini "$CCG_DIR/gemini.prompt" "$CCG_DIR/gemini.result"
-echo "---ANSWER---"
-cat "$CCG_DIR/gemini.result"
-```
-
 **两个 Bash 调用必须在同一条 assistant message 内发出**，才能真并行。
+
+**非 quality（Bailian × 2，不同厂商）：**
+
+```bash
+CCG_DIR=<字面路径>
+source ~/.claude/commands/ccg.sh
+CCG_BAILIAN_MODEL=<Reviewer A 模型> ccg_bailian "$CCG_DIR/slot1.prompt" "$CCG_DIR/slot1.result"
+echo "---ANSWER---"; cat "$CCG_DIR/slot1.result"
+```
+```bash
+CCG_DIR=<字面路径>
+source ~/.claude/commands/ccg.sh
+CCG_BAILIAN_MODEL=<Reviewer B 模型> ccg_bailian "$CCG_DIR/slot2.prompt" "$CCG_DIR/slot2.result"
+echo "---ANSWER---"; cat "$CCG_DIR/slot2.result"
+```
+
+**quality（premium，默认 codex + gemini；timeout 由 helper 内部控制）：**
+
+```bash
+CCG_DIR=<字面路径>
+source ~/.claude/commands/ccg.sh
+ccg_codex "$CCG_DIR/slot1.prompt" "$CCG_DIR/slot1.result"
+echo "---ANSWER---"; cat "$CCG_DIR/slot1.result"
+```
+```bash
+CCG_DIR=<字面路径>
+source ~/.claude/commands/ccg.sh
+ccg_gemini "$CCG_DIR/slot2.prompt" "$CCG_DIR/slot2.result"
+echo "---ANSWER---"; cat "$CCG_DIR/slot2.result"
+```
+
+> 让两个不同厂商的独立大脑产生差异——这正是分歧检测的来源。
 
 ### 步骤 6. 实际成本
 
+按各 slot 实际用的 provider 调用（`<provA>`/`<provB>` ∈ codex|gemini|bailian|claude）。
+**bailian 时把同一个 `CCG_BAILIAN_MODEL` 一起传**，成本才准确：
+
 ```bash
 CCG_DIR=<字面路径>
 source ~/.claude/commands/ccg.sh
-ccg_actual "$CCG_DIR/codex.prompt" "$CCG_DIR/codex.result" codex
-ccg_actual "$CCG_DIR/gemini.prompt" "$CCG_DIR/gemini.result" gemini
+# 非 quality 示例（两个不同厂商 Bailian）：
+CCG_BAILIAN_MODEL=<Reviewer A 模型> ccg_actual "$CCG_DIR/slot1.prompt" "$CCG_DIR/slot1.result" bailian
+CCG_BAILIAN_MODEL=<Reviewer B 模型> ccg_actual "$CCG_DIR/slot2.prompt" "$CCG_DIR/slot2.result" bailian
+# quality 示例：
+# ccg_actual "$CCG_DIR/slot1.prompt" "$CCG_DIR/slot1.result" codex
+# ccg_actual "$CCG_DIR/slot2.prompt" "$CCG_DIR/slot2.result" gemini
 ```
 
 ### 步骤 7. 健康判定 + 综合输出（**Pillar 1 关键**）
 
-| Codex | Gemini | 路径 |
+| Reviewer A | Reviewer B | 路径 |
 |---|---|---|
 | OK | OK | 完整三段输出（AGREEMENT / DIVERGENCE / BLINDSPOT）|
-| OK | FAIL | 只能输出 Codex 视角，标注分歧无法验证 |
-| FAIL | OK | 只能输出 Gemini 视角，标注分歧无法验证 |
+| OK | FAIL | 只能输出 A 视角，标注分歧无法验证 |
+| FAIL | OK | 只能输出 B 视角，标注分歧无法验证 |
 | FAIL | FAIL | Claude 独立回答 + 标注顾问不可用 |
+
+> **谁来综合（synthesizer）**：非 quality → 一个 Bailian 模型（最好是与 A/B 不同的第三个厂商，如 glm/kimi）；quality → codex/gemini/claude 三件套里没上场的那个（缺省 claude）。Claude 本体在 Claude Code 内即可直接做这步综合。
 
 **Claude 的综合规则（必须严格遵守）：**
 
@@ -220,12 +269,12 @@ ccg_actual "$CCG_DIR/gemini.prompt" "$CCG_DIR/gemini.result" gemini
 ### 步骤 8. 综合输出模板（**严格按此格式**）
 
 ```
-## CCG v3 综合结果
+## CCG 综合结果
 
 📍 评审范围：<source 标签，如 worktree | staged | upstream:origin/main>
 🎯 模式：<mode>（risk score: <分数> ｜ 触发: <reasons>）
-🩺 顾问状态：Codex ✓ ｜ Gemini ✓
-💰 本次成本：Codex $0.0023 + Gemini $0.0008 = **$0.0031**
+🩺 评审模型：A=<provider:model> ✓ ｜ B=<provider:model> ✓   （非 quality 为两个不同厂商 Bailian）
+💰 本次成本：A $0.0009 + B $0.0011 = **$0.0020**
 
 ═══ AGREEMENT (N) ═══
 两边都指出，新增信息量低：
@@ -235,10 +284,10 @@ ccg_actual "$CCG_DIR/gemini.prompt" "$CCG_DIR/gemini.result" gemini
 ═══ DIVERGENCE (M) ═══   ★ 这一段是 ccg 的核心价值 ★
 
 ▸ DIV#1 — file:line
-  🔵 Codex: <Codex 的判断>
-  🟢 Gemini: <Gemini 的判断 / 没提到>
+  🔵 Reviewer A (<model>): <A 的判断>
+  🟢 Reviewer B (<model>): <B 的判断 / 没提到>
   ⚖️  Claude 综合: <哪边更可信，为什么>
-  ➡️ 建议: <accept Codex / accept Gemini / NEEDS HUMAN DECISION>
+  ➡️ 建议: <accept A / accept B / NEEDS HUMAN DECISION>
 
 ▸ DIV#2 — ...
 
@@ -251,8 +300,8 @@ ccg_actual "$CCG_DIR/gemini.prompt" "$CCG_DIR/gemini.result" gemini
 <一句话理由>
 
 ═══ 来源原文（折叠展示）═══
-🔵 Codex (gpt-5-mini): <VERDICT 段原样>
-🟢 Gemini (gemini-2.5-flash): <VERDICT 段原样>
+🔵 Reviewer A (<provider:model>): <VERDICT 段原样>
+🟢 Reviewer B (<provider:model>): <VERDICT 段原样>
 ```
 
 **关键纪律：**

@@ -10,6 +10,40 @@ Major repositioning: from "multi-model divergence detector" to **"Code Change Gu
 **Before (v3):** "Surface where Codex and Gemini disagree — that's your decision point."
 **After (v4):** "Two independent AI model families guard every code change across four stages: Review synthesis → Deterministic commit gate → AI-assisted merge → Pre-push quality analysis."
 
+### Changed — Stage 1 Model Routing (Bailian-first)
+- **Default Stage 1 reviewers are now two DIFFERENT-vendor Bailian models** (vendors: `qwen / glm / mimo / deepseek / kimi / minimax`), not `codex gemini`.
+  - `cost` → `qwen-3.5-haiku` + `deepseek-v4-lite`; `balanced` → `qwen-3.6` + `deepseek-v4`.
+- **`codex` / `gemini` / `claude` are enabled only in `quality` mode**, where Stage 1 picks any 2 of the three and the leftover becomes the synthesizer (default `claude`). Risk auto-routing escalates high-risk diffs into quality.
+- New different-vendor guard: same-vendor Stage 1 pairs are rejected (override `CCG_ALLOW_SAME_VENDOR=1`).
+- Added **MiniMax** to the registry/pricing (`minimax-m2`, `minimax-m2-lite`) — completes the 6-vendor set.
+- New env knobs: `CCG_PROVIDERS` (mode-aware default), `CCG_ALLOW_SAME_VENDOR`, `CCG_SYNTH_PROVIDER`, `CCG_RISK_LLM`.
+
+### Fixed
+- **Ledger was recording empty rows**: `ccg_review` / `ccg_with_providers` / `ccg_with_bailian` passed `$(pwd)` instead of the workdir to `ccg_ledger_record`, so `files`/`paths`/`synthesis` were always blank. Now pass `$CCG_DIR`.
+- **L6 history read-side was never wired**: `ccg_review` now calls `ccg_ledger_context` and splices prior-review context into the prompt.
+- **Risk scoring is deterministic again**: the LLM path is now opt-in via `CCG_RISK_LLM=1` (was silently on whenever `BAILIAN_API_KEY` was set, contradicting the "pure rules, no LLM" contract).
+- **`gemini` cost tier resolved to `qwen-3.7`** (and `codex` cost → `deepseek-v4`), causing the CLIs to be invoked with foreign model names. Now `gemini-2.5-flash-lite` / `gpt-5-mini`.
+- Unified three divergent Bailian model resolvers; `_ccg_run_provider` no longer clobbers a user-set `CCG_BAILIAN_MODEL`.
+- Robust Bailian API-error detection via `jq` (was a loose grep that false-matched review prose containing `"code"`).
+- `_ccg_bailian_retry` no longer retries permanent errors (empty prompt / no key / missing jq).
+- `ccg_review` now persists a durable report (`ccg_persist_report`), matching the gate path.
+- `ccg_show_config` no longer crashes under zsh (`status` is read-only there) and no longer leaks `local`-in-loop values.
+- Prompt-size warning aligned with the hard `CCG_MAX_PROMPT_KB` reject threshold.
+- `package.json` version corrected to match this changelog; `bin/ccg.js` `which()` dead primary branch removed.
+
+### Fixed — V1 production-readiness audit (merge data-loss, security, gate)
+- **CRITICAL — silent merge data loss**: `_ccg_apply_resolutions`/`_ccg_parse_conflicts` treated `=======`/`|||||||`/`>>>>>>>` as conflict markers *anywhere* in a file, so a marker-like line outside a conflict (e.g. a Markdown `=======` setext underline) was dropped and committed. Marker handling is now gated on conflict state.
+- **CRITICAL — both sides dropped on unavailable resolution**: an empty/missing resolution wrote contentless markers (losing OURS *and* THEIRS). It now restores the original conflict block verbatim (markers + both sides) and flags needs-human.
+- **HIGH — line-ending corruption**: merge apply force-converted CRLF→LF across the whole file; pass-through lines now preserve their original bytes.
+- **HIGH — interior code stripped**: `grep -v '^CONFIDENCE:'` deleted *any* line starting with `CONFIDENCE:`; only a trailing AI-annotation line is now removed.
+- **HIGH — wrong exit code**: `ccg_merge` returned 0 on a needs-human BLOCKED merge, so `ccg_ship`/CI treated it as success. It now returns 1.
+- **Security — redaction gaps**: `AWS_SECRET_ACCESS_KEY=`, generic `*_KEY/*_SECRET/*_TOKEN=` env vars, `PASSWORD=`/`DB_PASS=`, Stripe `sk_live_`/`sk_test_` (underscore), and `user:pass@` URL userinfo are now masked; keyword-value threshold lowered 16→8 chars.
+- **Gate bailian-first fallback**: `ccg_precommit_gate` no longer hard-blocks a Bailian-only user's high-risk commits — when premium CLIs are absent in quality mode it falls back to the Bailian pair. It also respects an explicit `CCG_MODE` instead of overwriting it.
+- **API robustness**: non-numeric `CCG_BAILIAN_TEMP`/`*_MAX_TOKENS` no longer blank the `jq` payload (validated via `_ccg_num_or`); `ccg_claude` API-error detection uses `jq` (matching `ccg_bailian`).
+- **Timeout**: the portable-timeout fallback now also kills child processes (`pkill -P`) so a timed-out codex/gemini CLI doesn't keep running.
+- **Pre-push gate**: stopped blocking valid commits whose subject merely contains "todo"/"debug"; unattended auto-push now holds at HIGH risk (≥50) and won't push to an unconfigured remote; fixed `seq 1 0` bar-rendering glitch and an EXIT-trap leak on macOS; `bad_commits` no longer double-counts; unborn-branch handled cleanly.
+- **Pricing**: `-lite`/`-plus` Bailian models (`deepseek-v4-lite`, `kimi-k2.6-lite`, `glm-5.1-lite`, `qwen-3.6-plus`) were mispriced because the general glob arm matched first; specific arms now precede the general arm.
+
 ### Added — Stage 2: Auto Commit (Zero-LLM Gate)
 - **`ccg_commit <message>`** — new protocol layer
 - **🚫 No LLM calls** — reads Stage 1 synthesis from `.git/ccg/last-review.json`

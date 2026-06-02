@@ -58,6 +58,9 @@ EOF
     export CCG_NO_REPORT=1
     export CCG_NO_HISTORY=1
     export GEMINI_API_KEY=mock
+    # quality mode → gate uses the premium pair (codex+gemini), which these
+    # mocks cover. (cost/balanced would use Bailian, needing BAILIAN_API_KEY.)
+    export CCG_MODE=quality
     # shellcheck source=/dev/null
     source "$CCG_SH"
     ccg_precommit_gate 2>/dev/null
@@ -164,7 +167,7 @@ ec=0
 (
   cd "$tmpgit"
   export PATH="$tmpbin:$PATH"
-  export GEMINI_API_KEY=mock CCG_NO_CACHE=1 CCG_NO_REPORT=1 CCG_NO_HISTORY=1
+  export GEMINI_API_KEY=mock CCG_NO_CACHE=1 CCG_NO_REPORT=1 CCG_NO_HISTORY=1 CCG_MODE=quality
   # shellcheck source=/dev/null
   source "$CCG_SH"
   ccg_precommit_gate 2>/dev/null

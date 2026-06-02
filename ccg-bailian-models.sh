@@ -30,8 +30,16 @@ glm-5.1-lite:0.14:0.42:balanced:GLM 5.1 Lite
 # Mimo Series
 mimo-v2.5-pro:0.22:0.66:balanced:Mimo v2.5 Pro
 mimo-v2.5:0.11:0.33:cost:Mimo v2.5
+
+# MiniMax Series
+minimax-m2:0.30:0.90:quality:MiniMax M2 (质量优先)
+minimax-m2-lite:0.15:0.45:balanced:MiniMax M2 Lite
 EOF
 }
+
+# NOTE: _ccg_vendor_of and _ccg_resolve_bailian_pair are defined in ccg.sh
+# (the foundational file, always sourced first), so the git-hook gate — which
+# sources only ccg.sh — shares the same definitions. Do not redefine them here.
 
 # ============================================================
 # Get model pricing
@@ -39,7 +47,10 @@ EOF
 _ccg_bailian_price() {
   local model="$1" field="${2:-input}"
   local line
-  line=$(_ccg_bailian_models | grep "^${model}:" | head -1)
+  # Escape regex metacharacters in model name (especially . which matches any char)
+  local escaped_model
+  escaped_model=$(printf '%s' "$model" | sed 's/[.[\*^$()+?{|\\]/\\&/g')
+  line=$(_ccg_bailian_models | grep "^${escaped_model}:" | head -1)
   if [ -z "$line" ]; then
     echo "0"
     return 1
@@ -59,8 +70,10 @@ _ccg_bailian_price() {
 # ============================================================
 _ccg_bailian_tier() {
   local model="$1"
+  local escaped_model
+  escaped_model=$(printf '%s' "$model" | sed 's/[.[\*^$()+?{|\\]/\\&/g')
   local line
-  line=$(_ccg_bailian_models | grep "^${model}:" | head -1)
+  line=$(_ccg_bailian_models | grep "^${escaped_model}:" | head -1)
   [ -n "$line" ] && printf '%s' "$line" | cut -d: -f4
 }
 
@@ -73,22 +86,18 @@ _ccg_bailian_list() {
 
 # ============================================================
 # Resolve model by mode (cost|balanced|quality)
+#
+# Single source of truth, consistent with ccg.sh:_ccg_resolve_bailian_model.
+# Honors an explicit CCG_BAILIAN_MODEL override first. This is the per-slot
+# single-model resolver (the default-pair resolver is _ccg_resolve_bailian_pair).
 # ============================================================
 _ccg_resolve_bailian_model_by_mode() {
-  local mode="${1:-balanced}"
-  local line
-  case "$mode" in
-    cost)
-      line=$(_ccg_bailian_models | grep ':cost:' | head -1)
-      ;;
-    quality)
-      line=$(_ccg_bailian_models | grep ':quality:' | head -1)
-      ;;
-    *)
-      line=$(_ccg_bailian_models | grep ':balanced:' | head -1)
-      ;;
+  if [ -n "${CCG_BAILIAN_MODEL:-}" ]; then printf '%s' "$CCG_BAILIAN_MODEL"; return; fi
+  case "${1:-balanced}" in
+    cost)    printf '%s' "kimi-k2.6" ;;
+    quality) printf '%s' "deepseek-v4" ;;
+    *)       printf '%s' "qwen-3.6" ;;
   esac
-  [ -n "$line" ] && printf '%s' "$line" | cut -d: -f1
 }
 
 # ============================================================
@@ -96,7 +105,9 @@ _ccg_resolve_bailian_model_by_mode() {
 # ============================================================
 _ccg_bailian_model_exists() {
   local model="$1"
-  _ccg_bailian_models | grep -q "^${model}:" && return 0 || return 1
+  local escaped_model
+  escaped_model=$(printf '%s' "$model" | sed 's/[.[\*^$()+?{|\\]/\\&/g')
+  _ccg_bailian_models | grep -q "^${escaped_model}:" && return 0 || return 1
 }
 
 # ============================================================
@@ -104,7 +115,9 @@ _ccg_bailian_model_exists() {
 # ============================================================
 _ccg_bailian_model_desc() {
   local model="$1"
+  local escaped_model
+  escaped_model=$(printf '%s' "$model" | sed 's/[.[\*^$()+?{|\\]/\\&/g')
   local line
-  line=$(_ccg_bailian_models | grep "^${model}:" | head -1)
+  line=$(_ccg_bailian_models | grep "^${escaped_model}:" | head -1)
   [ -n "$line" ] && printf '%s' "$line" | cut -d: -f5
 }

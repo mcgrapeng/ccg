@@ -31,10 +31,12 @@ _ccg_bi_build_prompt() {
 ccg_with_bailian() {
   local diff_file="$1"
 
-  eval "$(ccg_init)"
-  eval "$(ccg_preflight)"
+  init_out=$(ccg_init) || { echo "❌ ccg_init failed" >&2; return 1; }
+  _ccg_init_eval <<< "$init_out"
+  local bailian_status
+  bailian_status=$(ccg_preflight | grep '^CCG_PREFLIGHT_BAILIAN=' | cut -d= -f2)
 
-  if [ "$CCG_PREFLIGHT_BAILIAN" != "ok" ]; then
+  if [ "$bailian_status" != "ok" ]; then
     echo "❌ Bailian not configured. Set BAILIAN_API_KEY." >&2
     return 1
   fi
@@ -84,8 +86,9 @@ ccg_with_bailian() {
 
   cat "$CCG_SYNTHESIS_FILE"
 
-  # Record in ledger
-  ccg_ledger_record "$(pwd)" >/dev/null 2>&1 || true
+  # Record in ledger. Pass the workdir (CCG_DIR) so the recorder finds
+  # diff.txt / synthesis.txt / risk.txt — NOT $(pwd) (which has none of them).
+  ccg_ledger_record "$CCG_DIR" >/dev/null 2>&1 || true
 }
 
 # ============================================================
@@ -94,7 +97,8 @@ ccg_with_bailian() {
 ccg_bailian_interactive() {
   local prompt_file="$1"
 
-  eval "$(ccg_init)"
+  init_out=$(ccg_init) || { echo "❌ ccg_init failed" >&2; return 1; }
+  _ccg_init_eval <<< "$init_out"
 
   if [ -z "${BAILIAN_API_KEY:-}" ]; then
     echo "❌ BAILIAN_API_KEY not set" >&2
@@ -111,10 +115,13 @@ ccg_bailian_interactive() {
 ccg_compare_models() {
   local diff_file="$1"
 
-  eval "$(ccg_init)"
-  eval "$(ccg_preflight)"
+  init_out=$(ccg_init) || { echo "❌ ccg_init failed" >&2; return 1; }
+  _ccg_init_eval <<< "$init_out"
+  local codex_status bailian_status
+  codex_status=$(ccg_preflight | grep '^CCG_PREFLIGHT_CODEX=' | cut -d= -f2)
+  bailian_status=$(ccg_preflight | grep '^CCG_PREFLIGHT_BAILIAN=' | cut -d= -f2)
 
-  if [ "$CCG_PREFLIGHT_CODEX" != "ok" ] || [ "$CCG_PREFLIGHT_BAILIAN" != "ok" ]; then
+  if [ "$codex_status" != "ok" ] || [ "$bailian_status" != "ok" ]; then
     echo "❌ Missing API keys" >&2
     return 1
   fi
@@ -152,34 +159,45 @@ ccg_compare_models() {
 ccg_benchmark() {
   local prompt_file="$1"
 
-  eval "$(ccg_init)"
+  init_out=$(ccg_init) || { echo "❌ ccg_init failed" >&2; return 1; }
+  _ccg_init_eval <<< "$init_out"
 
   echo "Benchmarking models..."
 
   for model in "qwen-3.7" "qwen-3.6" "qwen-3.6-plus" "qwen-3.5-sonnet"; do
     echo ""
     echo "Testing $model..."
-    export CCG_BAILIAN_MODEL="$model"
+    # Use local variable instead of polluting environment
+    local CCG_BAILIAN_MODEL="$model"
+    export CCG_BAILIAN_MODEL
 
-    local start_time=$(date +%s%N)
-    if ccg_bailian "$prompt_file" "/tmp/bailian-$model.result" 2>/dev/null; then
-      local end_time=$(date +%s%N)
-      local elapsed_ms=$(( (end_time - start_time) / 1000000 ))
-      local size=$(wc -c < "/tmp/bailian-$model.result")
-      echo "  ✓ ${elapsed_ms}ms | ${size}b"
+    # Use mktemp instead of predictable /tmp path
+    local _bench_result
+    _bench_result=$(mktemp -t "ccg.bench.${model}.XXXXXXXX" 2>/dev/null) || _bench_result="${CCG_DIR:-/tmp}/ccg.bench.${model}.$$"
+
+    # Use seconds-based timing for macOS compatibility (no %N)
+    local start_time=$(date +%s)
+    if CCG_BAILIAN_MODEL="$model" ccg_bailian "$prompt_file" "$_bench_result" 2>/dev/null; then
+      local end_time=$(date +%s)
+      local elapsed_s=$(( end_time - start_time ))
+      local size=$(wc -c < "$_bench_result" 2>/dev/null | tr -d ' ')
+      echo "  ✓ ${elapsed_s}s | ${size}b"
     else
       echo "  ✗ Failed"
     fi
+    rm -f "$_bench_result" 2>/dev/null
   done
+  # Clean up the environment
+  unset CCG_BAILIAN_MODEL
 }
 
 # Main entry point
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-help}" in
-    run)        ccg_with_bailian "${2:-.}" ;;
-    stream)     ccg_bailian_interactive "${2:-.}" ;;
-    compare)    ccg_compare_models "${2:-.}" ;;
-    benchmark)  ccg_benchmark "${2:-.}" ;;
+    run)        ccg_with_bailian "${2:-}" ;;
+    stream)     ccg_bailian_interactive "${2:-}" ;;
+    compare)    ccg_compare_models "${2:-}" ;;
+    benchmark)  ccg_benchmark "${2:-}" ;;
     *)
       echo "Usage: $0 {run|stream|compare|benchmark} [file]"
       echo ""

@@ -108,7 +108,10 @@ t3_review_then_commit() {
   (
     cd "$tmpgit"
     export PATH="$tmpbin:$PATH" GEMINI_API_KEY=mock
-    unset CCG_REVIEW CCG_MODE CCG_PROVIDERS BAILIAN_API_KEY ANTHROPIC_API_KEY CLAUDE_API_KEY
+    unset CCG_REVIEW CCG_PROVIDERS BAILIAN_API_KEY ANTHROPIC_API_KEY CLAUDE_API_KEY
+    # quality mode unlocks the premium pair (codex+gemini) which the mocks cover;
+    # the non-quality default is two Bailian models needing a real BAILIAN_API_KEY.
+    export CCG_MODE=quality
     . "$WORKFLOW"
     ccg_review            >/dev/null 2>&1
     ccg_commit "feat: line2" >/dev/null 2>&1
@@ -210,7 +213,9 @@ t7_review_includes_untracked() {
   (
     cd "$tmpgit"
     export PATH="$tmpbin:$PATH" GEMINI_API_KEY=mock
-    unset CCG_REVIEW CCG_MODE CCG_PROVIDERS BAILIAN_API_KEY ANTHROPIC_API_KEY CLAUDE_API_KEY
+    unset CCG_REVIEW CCG_PROVIDERS BAILIAN_API_KEY ANTHROPIC_API_KEY CLAUDE_API_KEY
+    # quality mode unlocks the premium pair (codex+gemini) covered by the mocks.
+    export CCG_MODE=quality
     . "$WORKFLOW"
     ccg_review                 >/dev/null 2>&1
     ccg_commit "feat: both"    >/dev/null 2>&1

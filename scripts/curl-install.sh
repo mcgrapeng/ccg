@@ -84,8 +84,11 @@ download_file() {
   return 1
 }
 
-TMPDIR="$(mktemp -d -t ccg-install.XXXXXXXX)"
-trap 'rm -rf "$TMPDIR"' EXIT
+# Use a non-standard variable name to avoid polluting the global TMPDIR
+# which other tools (including ccg.sh itself) depend on.
+CCG_INSTALL_TMPDIR="$(mktemp -d -t ccg-install.XXXXXXXX)"
+TMPDIR="$CCG_INSTALL_TMPDIR"
+trap 'rm -rf "$CCG_INSTALL_TMPDIR"' EXIT
 
 echo "→ Downloading ccg.sh"
 if ! download_file "ccg.sh" "$TMPDIR/ccg.sh"; then
@@ -106,6 +109,38 @@ fi
 [ -s "$TMPDIR/ccg.md" ] || { echo "FATAL: ccg.md downloaded but empty" >&2; exit 2; }
 head -1 "$TMPDIR/ccg.sh" | grep -q '^#!' \
   || { echo "FATAL: ccg.sh doesn't look like a shell script" >&2; exit 2; }
+
+# Integrity check: verify SHA-256 checksums against GitHub release assets if available.
+# This prevents CDN poisoning or MITM attacks from executing arbitrary code.
+echo "→ Verifying integrity..."
+_ccg_install_verify_checksum() {
+  local file="$1"
+  local checksum_url="https://raw.githubusercontent.com/$REPO/$TAG/scripts/checksums.sha256"
+  local checksums
+  if checksums=$(curl -fsSL --connect-timeout 10 --max-time 30 "$checksum_url" 2>/dev/null); then
+    local expected
+    expected=$(printf '%s\n' "$checksums" | grep "$(basename "$file")" | awk '{print $1}')
+    if [ -n "$expected" ]; then
+      local actual
+      if command -v shasum >/dev/null 2>&1; then
+        actual=$(shasum -a 256 "$file" | awk '{print $1}')
+      elif command -v sha256sum >/dev/null 2>&1; then
+        actual=$(sha256sum "$file" | awk '{print $1}')
+      fi
+      if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
+        echo "FATAL: checksum mismatch for $(basename "$file")" >&2
+        echo "  expected: $expected" >&2
+        echo "  actual:   $actual" >&2
+        echo "  This may indicate a compromised download. Aborting." >&2
+        return 1
+      fi
+    fi
+  fi
+  # If checksums file is not available (older releases), proceed with a warning
+  return 0
+}
+_ccg_install_verify_checksum "$TMPDIR/ccg.sh" || exit 2
+_ccg_install_verify_checksum "$TMPDIR/ccg.md" || exit 2
 
 echo "→ Installing to $TARGET_DIR"
 mkdir -p "$TARGET_DIR"

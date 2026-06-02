@@ -280,12 +280,12 @@ CCG 基于风险评分自动选择模式，或通过 `CCG_MODE` 强制指定。
 | 阶段 | 用模型？ | 使用哪个 |
 |---|---|---|
 | **Diff Capture** | ❌ | 纯 git 操作 |
-| **Risk Score** | ✅ Bailian LLM | 失败降级到规则引擎 |
-| **Stage 1: 评审** | ✅ 2 个并行 | Codex + Bailian（默认）|
-| **Synthesize** | ✅ 1 个 | Codex > Bailian > Gemini（按可用性）|
-| **Stage 2: 提交门禁** | ✅ 2 个并行 | Codex + Bailian（可配置）|
-| **Stage 3: Merge 冲突** | ✅ **Bailian 优先** | Codex + Gemini 作为降级 |
-| **Stage 4: Push 检查** | ✅ Bailian LLM | 仅用于风险评分 |
+| **Risk Score** | ❌ 默认 | 纯规则、确定性、零成本；`CCG_RISK_LLM=1` 才用 Bailian LLM |
+| **Stage 1: 评审** | ✅ 2 个并行（不同厂商）| 非 quality：两个不同厂商 Bailian（默认 qwen + deepseek）；quality：codex/gemini/claude 三选二 |
+| **Synthesize** | ✅ 1 个 | 非 quality：Bailian；quality：三件套里没上场的那个（缺省 claude）|
+| **Stage 2: 提交门禁** | ✅ 2 个并行 | 同 Stage 1（mode 感知；非 quality=两个不同厂商 Bailian）|
+| **Stage 3: Merge 冲突** | ✅ **Bailian 优先** | Claude → Codex + Gemini 作为降级 |
+| **Stage 4: Push 检查** | ❌ 默认 | 风险评分（纯规则，同 Risk Score）|
 
 ### 可用的 Bailian 模型
 

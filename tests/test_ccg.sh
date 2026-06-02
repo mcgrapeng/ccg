@@ -295,10 +295,14 @@ chmod +x "$MOCK_DIR/gemini"
 
 run_ccg_codex_with_mock() {
   local mode="$1"
+  # $2 = timeout seconds. Default generous (30) so happy-path mocks never
+  # spuriously time out under heavy load; hang tests pass a short value to fire
+  # the timeout fast (the hang mock sleeps 30).
+  local to="${2:-30}"
   fresh_source
   out=$(ccg_init); CCG_DIR=$(echo "$out" | sed -n 's/^CCG_DIR=//p')
   echo "review this file mode=$mode" > "$CCG_DIR/codex.prompt"
-  ( PATH="$MOCK_DIR:$PATH" MOCK_CODEX_MODE="$mode" CCG_CODEX_TIMEOUT=8 CCG_NO_CACHE=1 ccg_codex "$CCG_DIR/codex.prompt" "$CCG_DIR/codex.result" 2>&1 )
+  ( PATH="$MOCK_DIR:$PATH" MOCK_CODEX_MODE="$mode" CCG_CODEX_TIMEOUT="$to" CCG_NO_CACHE=1 ccg_codex "$CCG_DIR/codex.prompt" "$CCG_DIR/codex.result" 2>&1 )
   ec=$?
   ccg_cleanup "$CCG_DIR" >/dev/null
   echo "EC=$ec"
@@ -306,10 +310,11 @@ run_ccg_codex_with_mock() {
 
 run_ccg_gemini_with_mock() {
   local mode="$1"
+  local to="${2:-30}"   # see run_ccg_codex_with_mock
   fresh_source
   out=$(ccg_init); CCG_DIR=$(echo "$out" | sed -n 's/^CCG_DIR=//p')
   echo "ux review mode=$mode" > "$CCG_DIR/gemini.prompt"
-  ( PATH="$MOCK_DIR:$PATH" GEMINI_API_KEY="dummy-key" MOCK_GEMINI_MODE="$mode" CCG_GEMINI_TIMEOUT=8 CCG_NO_CACHE=1 ccg_gemini "$CCG_DIR/gemini.prompt" "$CCG_DIR/gemini.result" 2>&1 )
+  ( PATH="$MOCK_DIR:$PATH" GEMINI_API_KEY="dummy-key" MOCK_GEMINI_MODE="$mode" CCG_GEMINI_TIMEOUT="$to" CCG_NO_CACHE=1 ccg_gemini "$CCG_DIR/gemini.prompt" "$CCG_DIR/gemini.result" 2>&1 )
   ec=$?
   ccg_cleanup "$CCG_DIR" >/dev/null
   echo "EC=$ec"
@@ -332,7 +337,7 @@ r=$(run_ccg_codex_with_mock fail)
 assert_match "$r" "CCG_CODEX_FAIL=empty-output"
 
 t_start "6.5 ccg_codex hung command times out at FAIL=timeout-Ns"
-r=$(run_ccg_codex_with_mock hang)
+r=$(run_ccg_codex_with_mock hang 3)
 assert_match "$r" "CCG_CODEX_FAIL=timeout"
 
 t_start "6.6 ccg_codex with empty prompt returns FAIL=empty-prompt"
@@ -379,7 +384,7 @@ r=$(run_ccg_gemini_with_mock long_err)
 assert_match "$r" "CCG_GEMINI_OK"
 
 t_start "7.8 ccg_gemini hung command times out at FAIL=timeout-Ns"
-r=$(run_ccg_gemini_with_mock hang)
+r=$(run_ccg_gemini_with_mock hang 3)
 assert_match "$r" "CCG_GEMINI_FAIL=timeout"
 
 t_start "7.9 ccg_gemini with empty prompt returns FAIL=empty-prompt"
@@ -488,10 +493,15 @@ fresh_source
 out=$(_ccg_resolve_codex_model)
 assert_eq "$out" "gpt-5.4"
 
-t_start "12.2 _ccg_resolve_codex_model cost picks deepseek-v4"
+t_start "12.2 _ccg_resolve_codex_model cost picks gpt-5-mini"
 fresh_source
 out=$(CCG_MODE=cost _ccg_resolve_codex_model)
-assert_eq "$out" "deepseek-v4"
+assert_eq "$out" "gpt-5-mini"
+
+t_start "12.2b _ccg_resolve_gemini_model cost picks gemini-2.5-flash-lite (not a qwen model)"
+fresh_source
+out=$(CCG_MODE=cost _ccg_resolve_gemini_model)
+assert_eq "$out" "gemini-2.5-flash-lite"
 
 t_start "12.3 _ccg_resolve_gemini_model quality picks gemini-3.5-flash"
 fresh_source
@@ -570,11 +580,11 @@ out=$(ccg_init); CCG_DIR=$(echo "$out" | sed -n 's/^CCG_DIR=//p')
 echo "stable prompt for cache test" > "$CCG_DIR/codex.prompt"
 # First call → miss, populates cache
 r1=$(CCG_CACHE_DIR="$tmpcache" CCG_USAGE_LOG="$tmplog" \
-     PATH="$MOCK_DIR:$PATH" MOCK_CODEX_MODE=ok CCG_CODEX_TIMEOUT=8 \
+     PATH="$MOCK_DIR:$PATH" MOCK_CODEX_MODE=ok CCG_CODEX_TIMEOUT=30 \
      ccg_codex "$CCG_DIR/codex.prompt" "$CCG_DIR/codex.result" 2>&1)
 # Second call → hit
 r2=$(CCG_CACHE_DIR="$tmpcache" CCG_USAGE_LOG="$tmplog" \
-     PATH="$MOCK_DIR:$PATH" MOCK_CODEX_MODE=ok CCG_CODEX_TIMEOUT=8 \
+     PATH="$MOCK_DIR:$PATH" MOCK_CODEX_MODE=ok CCG_CODEX_TIMEOUT=30 \
      ccg_codex "$CCG_DIR/codex.prompt" "$CCG_DIR/codex.result" 2>&1)
 ccg_cleanup "$CCG_DIR" >/dev/null
 rm -rf "$tmpcache" "$tmplog"
@@ -585,9 +595,9 @@ fresh_source
 tmpcache=$(mktemp -d)
 out=$(ccg_init); CCG_DIR=$(echo "$out" | sed -n 's/^CCG_DIR=//p')
 echo "stable" > "$CCG_DIR/codex.prompt"
-CCG_CACHE_DIR="$tmpcache" PATH="$MOCK_DIR:$PATH" MOCK_CODEX_MODE=ok CCG_CODEX_TIMEOUT=8 \
+CCG_CACHE_DIR="$tmpcache" PATH="$MOCK_DIR:$PATH" MOCK_CODEX_MODE=ok CCG_CODEX_TIMEOUT=30 \
   ccg_codex "$CCG_DIR/codex.prompt" "$CCG_DIR/codex.result" >/dev/null 2>&1
-r=$(CCG_CACHE_DIR="$tmpcache" CCG_NO_CACHE=1 PATH="$MOCK_DIR:$PATH" MOCK_CODEX_MODE=ok CCG_CODEX_TIMEOUT=8 \
+r=$(CCG_CACHE_DIR="$tmpcache" CCG_NO_CACHE=1 PATH="$MOCK_DIR:$PATH" MOCK_CODEX_MODE=ok CCG_CODEX_TIMEOUT=30 \
     ccg_codex "$CCG_DIR/codex.prompt" "$CCG_DIR/codex.result" 2>&1)
 ccg_cleanup "$CCG_DIR" >/dev/null
 rm -rf "$tmpcache"
@@ -666,7 +676,7 @@ echo "ok" > "$out_file"
 EOF
 chmod +x "$MOCK_DIR/codex"
 rm -f /tmp/ccg_test_argsink.*
-( PATH="$MOCK_DIR:$PATH" CCG_MODE=quality CCG_CODEX_TIMEOUT=8 CCG_NO_CACHE=1 \
+( PATH="$MOCK_DIR:$PATH" CCG_MODE=quality CCG_CODEX_TIMEOUT=30 CCG_NO_CACHE=1 \
   ccg_codex "$CCG_DIR/codex.prompt" "$CCG_DIR/codex.result" ) >/dev/null 2>&1
 ccg_cleanup "$CCG_DIR" >/dev/null
 saved=$(cat /tmp/ccg_test_argsink.* 2>/dev/null | head -1)

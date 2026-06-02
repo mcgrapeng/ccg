@@ -1,6 +1,6 @@
 {
   "name": "@mcgrapeng/ccg",
-  "version": "3.2.0",
+  "version": "4.0.0",
   "description": "Code Change Guardian — a multi-model code review and Git workflow automation CLI for Claude Code: divergence-aware review, risk-aware model routing, AI merge-conflict resolution, and a graphical pre-push gate.",
   "keywords": [
     "claude-code",
@@ -29,6 +29,9 @@
   "license": "MIT",
   "author": "mcgrapeng",
   "private": true,
+  "bin": {
+    "ccg": "./bin/ccg.js"
+  },
   "type": "commonjs",
   "engines": {
     "node": ">=16"
@@ -38,7 +41,7 @@
     "linux"
   ],
   "scripts": {
-    "test": "bash tests/test_ccg.sh",
-    "lint:sh": "shellcheck ccg.sh scripts/install.sh || true"
+    "test": "for t in tests/test_*.sh; do echo \"== $t ==\"; bash \"$t\" || exit 1; done",
+    "lint:sh": "shellcheck ccg.sh ccg-workflow.sh ccg-multi-provider.sh ccg-bailian-models.sh ccg-bailian-integration.sh scripts/install.sh || true"
   }
 }

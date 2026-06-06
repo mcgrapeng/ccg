@@ -12,7 +12,7 @@
 
 ## 1. ccg 是什么
 
-ccg 是 **在 Claude Code 里调用 Codex + Gemini CLI 的生产级编排层**。
+ccg 是 **多模型代码评审守护者 + 风险感知路由 + 评审记忆 + 4 阶段自动化工作流**的一体化 Git 工作流引擎。Stage 1 默认使用两个不同供应商的百炼模型（cost/balanced 模式）或 codex+gemini（quality 模式）。
 
 "代码变更守护者"是叠在六个底层之上的 [L7 产品钩子](#l7--分歧综合claude-端)——这六层每一层都独立解决一个真实工程问题，否则你从 slash command 里 shell-out 到 LLM CLI 会立刻撞上。
 
@@ -48,6 +48,12 @@ ccg 是 **在 Claude Code 里调用 Codex + Gemini CLI 的生产级编排层**�
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L1  安全 CLI 调度      _ccg_run_with_timeout / _ccg_redact /            │
 │      ccg_cleanup / _ccg_check_prompt_size / mktemp 700 隔离              │
+├─────────────────────────────────────────────────────────────────────────┤
+│  L0  VCS 抽象           _ccg_vcs_detect / _ccg_vcs_root /                │
+│      _ccg_vcs_info                                                      │
+│      仅支持 git（SVN 计划中）                                            │
+│      + ccg_precommit_gate → commit 门禁 (exit 0/1)                       │
+│      + ccg_install_hook / ccg_uninstall_hook                             │
 └─────────────────────────────────────────────────────────────────────────┘
 
        ↑                                       ↑
@@ -147,7 +153,7 @@ CCG_RISK_REASONS=auth+40 sql_interp+30 size>300+15 docs_only-40
 | 文件 > 8 个 | +10 | hunk 数 |
 | 仅文档改动（`.md` / `.txt` / `.rst`） | **-40** | 路径扩展名 |
 
-**阈值：** `< 20 → cost`，`< 60 → balanced`，`≥ 60 → quality`。
+**阈值：** `< 30 → cost`，`30-70 → balanced`，`> 70 → quality`。
 
 **为什么不用 LLM：** 透明、零成本、权重可 PR。社区贡献者可以 `sed -i 's/+40/+50/' ccg.sh` 然后提 1 行 PR。换成 LLM 评分器，每次路由决策都变成黑箱。
 
@@ -354,7 +360,7 @@ CCG_RISK_REASONS=<信号+权重 信号+权重 ...>
 
 ## 6. 测试套件验证的不变量
 
-`tests/test_ccg.sh` 强制这些——最近一次跑 121 个测试。违反任一会破 CI。
+`tests/test_ccg.sh` 强制这些——最近一次跑 141 个测试。违反任一会破 CI。
 
 | 不变量 | 为什么 |
 |---|---|
@@ -426,7 +432,8 @@ L7 工作流协调一个四阶段过程，跨越 bash 函数和 Claude 综合，
 **阶段 2：ccg_commit()** — 零 LLM 哈希验证门控
 - 综合后，ccg 验证评审 commit 元数据
 - 纯 bash：无额外 LLM 成本，仅 diff 完整性的确定性检查
-- 通过 `ccg_precommit_gate` 允许或拒绝 commit 门控（exit 0/1）
+- 根据裁决（merge/fix-required/discuss）允许或拒绝提交
+- 注意：`ccg_precommit_gate` 是 git hook 路径的独立函数，不被 `ccg_commit()` 调用
 
 **阶段 3：ccg_merge()** — 冲突解决（百炼主裁）
 - 如果存在多个评审者，使用百炼作为主裁合并他们的裁定

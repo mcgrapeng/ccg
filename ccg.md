@@ -2,7 +2,7 @@
 description: Code Change Guardian — multi-model review, AI commit gate, merge conflict resolution, and pre-push analysis.
 ---
 
-# CCG v3 — Code Change Guardian
+# CCG v4 — Code Change Guardian
 
 > **4-Stage Guardian**: Two independent AI model families guard every change across Review · Commit · Merge · Push—surfacing where they disagree, auto-filtering low-risk changes, and providing a pre-push quality gate before code leaves your machine.
 

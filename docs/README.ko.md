@@ -1,10 +1,10 @@
-# ccg — Code Divergence Detector
+# CCG — Code Change Guardian
 
-> Codex와 Gemini가 당신의 diff에서 의견을 달리하는 곳을 부각시킨다——그곳이 당신이 결정을 내려야 할 곳이다.
+> 2개의 독립적인 AI 모델 패밀리가 모든 변경을守护——Review · Commit · Merge · Push 전체 경로를 커버.
 > 
 > Claude Code의 슬래시 명령. 한 번 설치하고 diff 위에서 `/ccg`를 입력하세요.
 
-[![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-141%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
 [![npm downloads](https://img.shields.io/npm/dm/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
 [![GitHub stars](https://img.shields.io/github/stars/mcgrapeng/ccg.svg?style=social&label=Star)](https://github.com/mcgrapeng/ccg/stargazers)
@@ -14,29 +14,26 @@
 
 ---
 
-## ccg란
+## CCG란
 
-`auth/login.go` 변경 후 머지하려고 합니다. 안전 점검을 하고 싶습니다. 오늘 선택지는 세 가지뿐이고, 모두 결함이 있습니다:
+**CCG (Code Change Guardian)** 는 다중 모델 코드 리뷰 및 Git 워크플로우 자동화 시스템입니다. 2개의 독립적인 AI 모델 패밀리가 **Review · Commit · Merge · Push** 전체 경로를守护——의견 차이를 부각하고, 저위험 변경을 자동 필터링하며, 코드가 머신을 떠나기 전에 푸시 전 품질 게이트를 제공합니다.
 
-- **단일 모델 리뷰**(Copilot, Cursor `/review`, Aider)는 **한 가지 관점**만 제공합니다. Claude가 timing attack을 놓치면 당신도 함께 놓칩니다.
-- **다중 모델 게이트웨이**(zen-mcp-server 등)는 의견을 **평균화**하여, 똑똑한 모델들이 의견을 달리한 곳 — 인간이 정말로 도움이 필요한 유일한 곳 — 을 정확히 가립니다.
-- **수동 교차 검증**은 시간이 무한하다면 할 일. 당신에겐 없습니다.
+ccg는 Claude Code용 `/ccg` 슬래시 명령으로 다음을 해결합니다:
 
-ccg는 Claude Code용 `/ccg` 슬래시 명령으로, 이 세 가지 모두를 진짜로 해결합니다. 임의의 diff에 대해:
-
-1. 같은 prompt를 **Codex(OpenAI)** 와 **Gemini(Google)** 에 병렬 전송
-2. **Claude** 가 두 보고서를 읽고 **그들이 의견을 달리하는 곳을 부각** —— 인간 판단이 필요한 곳
-3. 비용 추적, 위험 수준에 적합한 가장 저렴한 모델 자동 선택, 과거 리뷰 기억
+1. **Stage 1: 코드 리뷰** — 2개의 독립적인 모델이 병렬로 리뷰하고, Claude가 분기를 감지
+2. **Stage 2: 커밋 게이트** — 제로 LLM 해시 검증 (리뷰한 내용만 커밋)
+3. **Stage 3: AI 머지** — 3단계 폴백으로 충돌 해결 (Bailian → Claude → Codex+Gemini)
+4. **Stage 4: 푸시 전 분석** — 그래픽 품질 스코어카드
 
 **비유**: 다른 팀의 시니어 엔지니어 두 명에게 같은 PR을 리뷰시키고, 테크 리드가 종합: "이건 둘 다 동의, 이건 의견이 갈렸음 — 당신이 결정, 내 견해는 다음".
 
-## ccg의 능력 집합 (5가지 핵심 기능)
+## 4단계 능력 집합
 
-1. **병렬 리뷰** — 같은 prompt를 Codex와 Gemini에 동시 전송
-2. **분기 감지** — Claude가 양자가 의견을 달리하는 곳을 부각 (동의한 곳이 아님)
-3. **리스크 인식 라우팅** — 자동으로 diff를 점수화하고 cost / balanced / quality 모드 선택
-4. **비용 추적** — 모든 호출을 기록; 24시간 캐시로 반복 리뷰는 무료 ($0.00)
-5. **리뷰 메모리** — 과거 리뷰를 저장; 다음 리뷰는 자동으로 히스토리를 주입하므로 반복 패턴이 나타나고 세션 간 사라지지 않음
+1. **코드 리뷰 (`ccg review`)** — 2개의 독립적인 모델이 병렬로 리뷰하고 분기를 감지
+2. **커밋 게이트 (`ccg commit`)** — 제로 LLM 해시 검증, 리뷰한 내용만 커밋
+3. **AI 머지 (`ccg merge`)** — 3단계 폴백으로 충돌 해결
+4. **푸시 전 분석 (`ccg push`)** — 그래픽 품질 스코어카드
+5. **원클릭 쉽 (`ccg ship`)** — 리뷰 → 커밋 → 머지를 일괄 실행
 
 ## 언제 ccg를 사용할까
 
@@ -386,9 +383,9 @@ CCG_NO_CACHE=1 /ccg            # 이번 호출만 24h 캐시 우회
 
 | 모드 | Codex | Gemini | 표준 비용 |
 |---|---|---|---|
-| `cost`     | gpt-5-nano  | gemini-2.5-flash-lite | ~$0.0007 |
-| `balanced` | gpt-5-mini  | gemini-2.5-flash      | ~$0.0046 |
-| `quality`  | gpt-5       | gemini-2.5-pro        | ~$0.0440 |
+| `cost`     | gpt-5-mini  | gemini-2.5-flash-lite | ~$0.0007 |
+| `balanced` | gpt-5.4     | gemini-2.5-flash      | ~$0.0046 |
+| `quality`  | gpt-5.5     | gemini-3.5-flash      | ~$0.0440 |
 
 누적 지출 추적:
 
@@ -415,7 +412,7 @@ ccg는 **7개 계층**으로 구성되며, "분기 검출"은 최상위 1개 계
 테스트:
 
 ```bash
-bash tests/test_ccg.sh                # 99개 회귀 테스트, ~31s
+bash tests/test_ccg.sh                # 141개 회귀 테스트, ~45s
 REAL_CLI=1 bash tests/test_ccg.sh     # +2개 실제 API 테스트 (비용 발생)
 ```
 

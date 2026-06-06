@@ -114,8 +114,8 @@ CCG_PROVIDERS="codex:gpt-5.5 gemini:gemini-3.5-flash" # 显式模型
 # claude 会被拒绝
 ```
 
-### 百炼模型注册表(13 个,`ccg models` 可查)
-qwen-3.7 / 3.6 / 3.6-plus / 3.5-sonnet / 3.5-haiku · deepseek-v4 / -lite · kimi-k2.6 / -lite · glm-5.1 / -lite · mimo-v2.5-pro / v2.5(各含输入·输出价与档位)。
+### 百炼模型注册表(15 个,`ccg models` 可查)
+qwen-3.7 / 3.6 / 3.6-plus / 3.5-sonnet / 3.5-haiku · deepseek-v4 / -lite · kimi-k2.6 / -lite · glm-5.1 / -lite · mimo-v2.5-pro / v2.5 · minimax-m2 / minimax-m2-lite(各含输入·输出价与档位)。
 
 ---
 
@@ -127,7 +127,7 @@ qwen-3.7 / 3.6 / 3.6-plus / 3.5-sonnet / 3.5-haiku · deepseek-v4 / -lite · kim
 | **L2 内容寻址缓存** | 同 prompt 不重复付费(省 ~90%) | SHA-256(prompt+model)键,24h TTL,原子写,失败不入缓存,权限 600 |
 | **L3 智能 diff 抓取** | 提交后也能抓到改动 | 4 级回退 worktree(含未跟踪)→ staged → upstream → origin-head,输出 `CCG_DIFF_SOURCE` |
 | **L4 用量与成本遥测** | 按月 / 按模型看花费 | tab 分隔 usage.log;`ccg_usage`;字符数→token 估算(±15%) |
-| **L5 风险感知路由** | 自动选档,纯规则可解释可改 | 见下方权重表(也可优先用百炼 LLM 打分) |
+| **L5 风险感知路由** | 自动选档,纯规则可解释可改 | 见下方权重表(纯规则引擎;可选启用 LLM: `CCG_RISK_LLM=1`) |
 | **L6 评审账本(双向)** | "上次模型对这文件怎么判的" | append-only JSONL;`ccg_ledger_query`;`ccg_ledger_context` 注入历史;超 10000 行轮转 |
 | **L7 分歧检测(综合)** | 单模型看不到自己盲区 | 同 prompt 双投喂 → Claude 综合;兜底链 Claude→codex→bailian→gemini |
 
@@ -135,7 +135,7 @@ qwen-3.7 / 3.6 / 3.6-plus / 3.5-sonnet / 3.5-haiku · deepseek-v4 / -lite · kim
 - **路径**:auth+35 · payment+40 · migration+30 · crypto+30 · security+25 · infra+20 · ci+15;纯文档 −40
 - **内容**:sql_interp+30 · shell_exec+25 · privilege+25 · fs_delete+20 · hardcoded_host+5 · todo_marker+5
 - **规模**:>600 行 +25 / >300 +15 / >100 +5;文件数 >8 +10
-- 阈值:<20 cost · <60 balanced · 其余 quality
+- 阈值:<30 cost · 30-70 balanced · >70 quality
 
 ---
 

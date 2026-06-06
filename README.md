@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Bash](https://img.shields.io/badge/Shell-Bash%203.2%2B-green.svg)]()
-[![Models](https://img.shields.io/badge/Models-27%2B-purple.svg)]()
+[![Models](https://img.shields.io/badge/Models-25%2B-purple.svg)]()
 
 > **CCG (Code Change Guardian)** is a multi-model code review and Git workflow automation system.
 > Two independent AI model families guard every change across **Review · Commit · Merge · Push** —
@@ -211,21 +211,23 @@ CCG is built around four stages. Each has a specific purpose, model strategy, an
 **Purpose**: Identify bugs, security issues, and quality problems in your diff.
 
 **Model strategy**:
-- Runs **any 2 models in parallel** from 3 providers: `codex`, `gemini`, `bailian`
-- **Default: `codex + gemini`** (two independent CLI-based providers)
+- Runs **any 2 models in parallel** from different vendors
+- **Default depends on mode**:
+  - `cost`/`balanced`: two different-vendor Bailian models (e.g., `qwen-3.5-haiku` + `deepseek-v4-lite`)
+  - `quality`: `codex + gemini` (CLI-based, independent)
 - **🚫 Claude is STRICTLY FORBIDDEN in Stage 1** — it is reserved exclusively for the Synthesis step where it serves as the meta-reviewer with an independent perspective
 - Models are selected by current `CCG_MODE` (see [Model Strategy](#model-strategy))
 
-**`CCG_PROVIDERS` syntax** (Stage 1 only — 3 allowed providers):
+**`CCG_PROVIDERS` syntax** (Stage 1 only — max 2 parallel):
 ```bash
-# Default — codex + gemini (CLI-based, independent)
+# quality mode default — codex + gemini (CLI-based, independent)
 CCG_PROVIDERS="codex gemini"
 
 # Same provider, two different models — e.g., 2 Bailian models in parallel
 CCG_PROVIDERS="bailian:qwen-3.7 bailian:deepseek-v4"
 
-# Mix providers with explicit model overrides
-CCG_PROVIDERS="codex:gpt-5.5 gemini:gemini-3.5-flash"
+# Mix providers with explicit model overrides (quality mode only)
+CCG_MODE=quality CCG_PROVIDERS="codex:gpt-5.5 gemini:gemini-3.5-flash"
 
 # Cost optimization — all domestic models
 CCG_PROVIDERS="bailian:kimi-k2.6 bailian:glm-5.1"
@@ -413,6 +415,31 @@ checkout target → backup branch → git merge --no-commit
 
 ---
 
+### One-Click Ship (`ccg ship [target] [msg]`)
+
+**Purpose**: Combine review → commit → merge in a single command.
+
+**Pipeline**:
+1. `ccg review` — run full Stage 1 review
+2. `ccg commit` — commit with review gate (only if verdict is `merge`)
+3. `ccg merge <target>` — merge into target branch
+
+**Usage**:
+```bash
+# Ship to main with auto-detected target
+ccg ship
+
+# Ship to specific branch
+ccg ship main
+
+# Ship with custom commit message
+ccg ship main "feat: add user auth"
+```
+
+**When to use**: For rapid iteration when you want the full review-commit-merge pipeline in one command.
+
+---
+
 ## Model Strategy
 
 ### Four Independent Providers
@@ -438,9 +465,9 @@ CCG auto-selects mode based on risk score, or you can force it via `CCG_MODE`.
 
 | Mode | codex | claude | gemini | bailian |
 |---|---|---|---|---|
-| **`cost`** | `deepseek-v4` | `claude-haiku-4-5` | `qwen-3.7` | `kimi-k2.6` |
+| **`cost`** | `gpt-5-mini` | `claude-haiku-4-5` | `gemini-2.5-flash-lite` | `qwen-3.5-haiku` |
 | **`balanced`** | `gpt-5.4` | `claude-sonnet-4-6` | `gemini-2.5-flash` | `qwen-3.6` |
-| **`quality`** | `gpt-5.5` | `claude-opus-4-7` | `gemini-3.5-flash` | `deepseek-v4` |
+| **`quality`** | `gpt-5.5` | `claude-opus-4-7` | `gemini-3.5-flash` | `qwen-3.7` |
 
 ### Per-Stage Model Usage
 
@@ -480,9 +507,10 @@ CCG auto-selects mode based on risk score, or you can force it via `CCG_MODE`.
 
 | Variable | Default | Description |
 |---|---|---|
+| **Switches / Mode** | | |
 | `CCG_MODE` | auto | `cost` / `balanced` / `quality` |
 | `CCG_REVIEW` | `on` | Master switch: `on` / `off` (when off, `ccg review` is a no-op and `ccg commit` skips state check) |
-| `CCG_PROVIDERS` | `codex gemini` | Providers for Stage 1 (max 2 parallel). Claude is reserved for Synthesis by default. |
+| `CCG_PROVIDERS` | auto (depends on mode) | Providers for Stage 1 (max 2 parallel). quality: codex+gemini, cost/balanced: bailian pair. Claude is reserved for Synthesis by default. |
 | **Provider models** | | |
 | `CCG_CODEX_MODEL` | by mode | Override Codex model |
 | `CCG_CLAUDE_MODEL` | by mode | Override Claude model |
@@ -497,18 +525,46 @@ CCG auto-selects mode based on risk score, or you can force it via `CCG_MODE`.
 | `CCG_CLAUDE_BASE_URL` / `ANTHROPIC_BASE_URL` | api.anthropic.com | Claude proxy URL |
 | `CCG_GEMINI_BASE_URL` / `GEMINI_BASE_URL` | Google | Gemini proxy URL |
 | `CCG_BAILIAN_BASE_URL` | dashscope.aliyuncs.com | Bailian proxy URL |
-| **Other** | | |
+| **Timeouts / Parameters** | | |
+| `CCG_CODEX_TIMEOUT` | 240 | Codex timeout (seconds) |
+| `CCG_GEMINI_TIMEOUT` | 120 | Gemini timeout (seconds) |
+| `CCG_BAILIAN_TIMEOUT` | 120 | Bailian timeout (seconds) |
+| `CCG_CLAUDE_TIMEOUT` | 120 | Claude timeout (seconds) |
+| `CCG_BAILIAN_TEMP` | 0.7 | Bailian temperature |
+| `CCG_BAILIAN_MAX_TOKENS` | 4096 | Bailian max tokens |
+| `CCG_BAILIAN_RETRIES` | 3 | Bailian retry count |
+| `CCG_CLAUDE_RETRIES` | 3 | Claude retry count |
+| **Gate / Commit** | | |
 | `CCG_GATE_OFFLINE` | 0 | Set to 1 to skip Stage 2 review (legacy gate) |
 | `CCG_GATE_DISCUSS` | allow | Set to `block` to block discuss verdict |
 | `CCG_NO_AUTO_ADD` | 0 | Stage 2: skip auto `git add -A`, use only what's already staged |
 | `CCG_COMMIT_FORCE` | 0 | Stage 2: bypass diff-hash check (force commit even if diff changed) |
+| `CCG_AUTOCOMMIT_ALL` | 0 | Auto-commit all changes (including untracked) |
+| `CCG_AUTOCOMMIT_DRY_RUN` | 0 | Dry run mode for autocommit |
+| `CCG_DIFF_CACHED_ONLY` | 0 | Only use cached diff |
+| **Merge** | | |
 | `CCG_MERGE_DRY_RUN` | 0 | Stage 3: resolve but don't commit |
 | `CCG_MERGE_NO_AI` | 0 | Stage 3: skip AI resolution |
 | `CCG_MERGE_NO_FETCH` | 0 | Stage 3: skip remote fetch |
 | `CCG_MERGE_MAX_CONFLICTS` | 50 | Stage 3: max conflict files |
 | `CCG_MERGE_KEEP_BACKUP` | 0 | Stage 3: keep backup branch after success |
+| **Cache / Ledger / Reports** | | |
+| `CCG_NO_CACHE` | 0 | Disable prompt cache |
 | `CCG_CACHE_TTL_HOURS` | 24 | Prompt cache TTL |
+| `CCG_CACHE_DIR` | XDG default | Custom cache directory |
+| `CCG_MAX_PROMPT_KB` | 100 | Max prompt size in KB |
+| `CCG_USAGE_LOG` | XDG default | Custom usage log path |
+| `CCG_LEDGER_LOG` | XDG default | Custom ledger log path |
+| `CCG_LEDGER_MAX_LINES` | 10000 | Max ledger lines before rotation |
+| `CCG_NO_HISTORY` | 0 | Disable review history injection |
+| `CCG_HISTORY_MAX` | 3 | Max historical reviews to inject |
+| `CCG_NO_REPORT` | 0 | Disable report persistence |
+| `CCG_REPORT_DIR` | .ccg/reports | Custom report directory |
 | `CCG_KEEP_ARTIFACTS` | 0 | Keep workdir for debugging |
+| **Other** | | |
+| `CCG_ALLOW_SAME_VENDOR` | 0 | Allow same vendor in Stage 1 slots |
+| `CCG_SYNTH_PROVIDER` | auto | Override synthesizer provider |
+| `CCG_RISK_LLM` | 0 | Enable LLM-based risk scoring |
 
 ### Usage Examples
 
@@ -519,8 +575,8 @@ CCG_MODE=quality ccg review
 # Use only Bailian (offline-friendly for China)
 CCG_PROVIDERS="bailian" ccg review
 
-# Mix providers — codex + claude
-CCG_PROVIDERS="codex claude" ccg review
+# Mix providers — codex + claude (requires quality mode)
+CCG_MODE=quality CCG_PROVIDERS="codex claude" ccg review
 
 # Specific Bailian model
 CCG_BAILIAN_MODEL=deepseek-v4 ccg review
@@ -560,7 +616,7 @@ ccg/
 │       ├── _ccg_parse_conflicts    # extract <<<<<<<>>>>>>> blocks
 │       ├── _ccg_resolve_one_conflict  # 3-tier AI resolution
 │       └── _ccg_apply_resolutions  # atomic file rewrite
-├── ccg-bailian-models.sh           # 13-model Bailian registry
+├── ccg-bailian-models.sh           # 15-model Bailian registry
 ├── ccg-bailian-integration.sh      # Bailian API call helpers
 ├── ccg-multi-provider.sh           # 4-provider orchestration
 ├── ccg-workflow.sh                 # 4-stage workflow entry points
@@ -569,8 +625,7 @@ ccg/
 docs/
 ├── README.zh-CN.md / .ja.md / .ko.md    # Translations
 ├── ARCHITECTURE.md (+ 3 translations)   # Deep architecture
-├── CHANGELOG.md                         # Version history
-└── SVN.md                               # SVN integration notes
+└── CHANGELOG.md                         # Version history
 ```
 
 ### Storage (XDG-compliant)

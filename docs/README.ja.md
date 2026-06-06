@@ -1,10 +1,10 @@
-# ccg — Code Divergence Detector
+# CCG — Code Change Guardian
 
-> Codex と Gemini があなたのコード上で意見を異にした箇所を浮かび上がらせる——そこが、あなたが判断を下す必要がある場所。
+> 2つの独立したAIモデルファミリーがすべての変更を守护——Review · Commit · Merge · Push の全パスをカバー。
 > 
 > Claude Code のスラッシュコマンド。一度インストールして、diff の上で `/ccg` と入力するだけ。
 
-[![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-141%20passing-brightgreen.svg)]()
 [![npm](https://img.shields.io/npm/v/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
 [![npm downloads](https://img.shields.io/npm/dm/@mcgrapeng/ccg.svg)](https://www.npmjs.com/package/@mcgrapeng/ccg)
 [![GitHub stars](https://img.shields.io/github/stars/mcgrapeng/ccg.svg?style=social&label=Star)](https://github.com/mcgrapeng/ccg/stargazers)
@@ -14,29 +14,26 @@
 
 ---
 
-## ccg とは
+## CCG とは
 
-あなたは `auth/login.go` を編集し終え、マージしようとしています。念のため確認したい。今の選択肢は 3 つしかなく、全て欠点があります：
+**CCG (Code Change Guardian)** は、複数モデルによるコードレビューと Git ワークフロー自動化システムです。2つの独立したAIモデルファミリーが **Review · Commit · Merge · Push** 全パスを守护——意見の相違を浮き彫りにし、低リスク変更を自動フィルタリングし、コードがマシンを離れる前にプッシュ前品質ゲートを提供します。
 
-- **単一モデルのレビュー**（Copilot、Cursor `/review`、Aider）は **1 つの視点** しか提供しません。Claude が timing attack を見逃せば、あなたも一緒に見逃します。
-- **複数モデル集約ツール**（zen-mcp-server 等）は意見を **平均化** してしまい、優秀なモデル同士が意見を異にした箇所——人間が本当に助けを必要とする箇所——を覆い隠してしまいます。
-- **手動の二重チェック** は時間が無限にあればやりますが、ありませんね。
+ccg は Claude Code 用の `/ccg` スラッシュコマンドで、以下を解決します：
 
-ccg は Claude Code 用の `/ccg` スラッシュコマンドで、この 3 つを本当に解決します。任意の diff に対して：
-
-1. 同じ prompt を **Codex（OpenAI）** と **Gemini（Google）** に並列で送信
-2. **Claude** に両方のレポートを読ませ、**両者が意見を異にした箇所を浮かび上がらせる**——そこが人間の判断が必要な場所
-3. コストを記録、リスクに応じて最安充足モデルを自動選択、過去のレビュー履歴を保持
+1. **Stage 1: コードレビュー** — 2つの独立したモデルが並列でレビューし、Claude が分岐を検出
+2. **Stage 2: コミットゲート** — ゼロLLMハッシュ検証（レビューした内容だけをコミット）
+3. **Stage 3: AIマージ** — 3段階フォールバックによる衝突解決（Bailian → Claude → Codex+Gemini）
+4. **Stage 4: プッシュ前分析** — グラフィカルな品質スコアカード
 
 **例え話**：別チームの 2 人のシニアエンジニアに同じ PR をレビューさせ、テックリードに統合させる：「ここは両方同意、ここは意見が分かれた——あなたが決めて、私の見解は以下」。
 
-## ccg の能力セット（5 つのコア機能）
+## 4つのステージ能力セット
 
-1. **並行レビュー** — 同じ prompt を Codex と Gemini に同時送信
-2. **分岐検出** — Claude は両者が意見を異にした箇所を浮かび上がらせる（同意した箇所ではなく）
-3. **リスク認識ルーティング** — 自動的に diff をスコアリングし、cost / balanced / quality モードを選択
-4. **コスト追跡** — すべての呼び出しを記録；24h キャッシュで繰り返しレビューは無料（$0.00）
-5. **レビュー記憶** — 過去のレビューを保存；次回レビューは自動的に履歴を注入するため、再発パターンが浮かび上がり、セッション間で消えない
+1. **コードレビュー（`ccg review`）** — 2つの独立したモデルが並列でレビューし、分岐を検出
+2. **コミットゲート（`ccg commit`）** — ゼロLLMハッシュ検証、レビューした内容だけをコミット
+3. **AIマージ（`ccg merge`）** — 3段階フォールバックによる衝突解決
+4. **プッシュ前分析（`ccg push`）** — グラフィカルな品質スコアカード
+5. **ワンクリックシップ（`ccg ship`）** — レビュー → コミット → マージを一括実行
 
 ## いつ ccg を使うか
 
@@ -202,7 +199,7 @@ ccg_ledger_query "auth/login.go"
 
 同じレビューはリポジトリ内の `.ccg/reports/<sha>_<utc-timestamp>.md` にも自己完結型の Markdown レポートとして保存されます。Claude Code を閉じても、再実行せずに完全な出力（synthesis + Codex 生 + Gemini 生）を後から読めます。無効化は `CCG_NO_REPORT=1`、保存先変更は `CCG_REPORT_DIR=<path>`。（レポートを git に入れたくなければ `.ccg/` を `.gitignore` に追加するのを推奨。）
 
-## 四阶段能力集
+## 4つのステージ能力セット
 
 CCG は 4 つのステージで構成され、各ステージは明確な目的、モデル戦略、安全保証を持ちます。
 
@@ -387,9 +384,9 @@ CCG_NO_CACHE=1 /ccg            # この呼び出しのみ 24h キャッシュを
 
 | モード | Codex | Gemini | 標準コスト |
 |---|---|---|---|
-| `cost`     | gpt-5-nano  | gemini-2.5-flash-lite | ~$0.0007 |
-| `balanced` | gpt-5-mini  | gemini-2.5-flash      | ~$0.0046 |
-| `quality`  | gpt-5       | gemini-2.5-pro        | ~$0.0440 |
+| `cost`     | gpt-5-mini  | gemini-2.5-flash-lite | ~$0.0007 |
+| `balanced` | gpt-5.4     | gemini-2.5-flash      | ~$0.0046 |
+| `quality`  | gpt-5.5     | gemini-3.5-flash      | ~$0.0440 |
 
 累計支出はいつでも確認可能：
 
@@ -416,7 +413,7 @@ ccg は **7 層** で構成されており、「分岐検出」は最上位 1 �
 テスト：
 
 ```bash
-bash tests/test_ccg.sh                # 99 個の回帰テスト、~31s
+bash tests/test_ccg.sh                # 141 個の回帰テスト、~45s
 REAL_CLI=1 bash tests/test_ccg.sh     # +2 個のライブ API テスト（課金あり）
 ```
 

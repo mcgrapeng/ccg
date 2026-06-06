@@ -265,11 +265,11 @@ CCG 基于风险评分自动选择模式，或通过 `CCG_MODE` 强制指定。
 
 ### 每种模式的模型
 
-| 模式 | Codex 槽位 | Gemini 槽位 | Bailian 槽位 |
-|---|---|---|---|
-| **`cost`** | `deepseek-v4` | `qwen-3.7` | `kimi-k2.6` |
-| **`balanced`** | `gpt-5.4` | `gemini-2.5-flash` | `claude-sonnet-4-6` |
-| **`quality`** | `gpt-5.5` | `gemini-3.5-flash` | `claude-opus-4-7` |
+| 模式 | Codex 槽位 | Claude 槽位 | Gemini 槽位 | Bailian 槽位 |
+|---|---|---|---|---|
+| **`cost`** | `deepseek-v4` | `claude-haiku-4-5` | `qwen-3.7` | `kimi-k2.6` |
+| **`balanced`** | `gpt-5.4` | `claude-sonnet-4-6` | `gemini-2.5-flash` | `qwen-3.6` |
+| **`quality`** | `gpt-5.5` | `claude-opus-4-7` | `gemini-3.5-flash` | `deepseek-v4` |
 
 - **Cost 模式**：全 Bailian 平台国产顶级模型（DeepSeek、Qwen、Kimi、GLM、Mimo）
 - **Balanced 模式**：Claude/GPT/Gemini 中级
@@ -283,7 +283,7 @@ CCG 基于风险评分自动选择模式，或通过 `CCG_MODE` 强制指定。
 | **Risk Score** | ❌ 默认 | 纯规则、确定性、零成本；`CCG_RISK_LLM=1` 才用 Bailian LLM |
 | **Stage 1: 评审** | ✅ 2 个并行（不同厂商）| 非 quality：两个不同厂商 Bailian（默认 qwen + deepseek）；quality：codex/gemini/claude 三选二 |
 | **Synthesize** | ✅ 1 个 | 非 quality：Bailian；quality：三件套里没上场的那个（缺省 claude）|
-| **Stage 2: 提交门禁** | ✅ 2 个并行 | 同 Stage 1（mode 感知；非 quality=两个不同厂商 Bailian）|
+| **Stage 2: 提交门禁** | ❌ 0 次 LLM | 复用 Stage 1 verdict（零额外成本）|
 | **Stage 3: Merge 冲突** | ✅ **Bailian 优先** | Claude → Codex + Gemini 作为降级 |
 | **Stage 4: Push 检查** | ❌ 默认 | 风险评分（纯规则，同 Risk Score）|
 
@@ -313,22 +313,64 @@ CCG 基于风险评分自动选择模式，或通过 `CCG_MODE` 强制指定。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
+| **开关 / 模式** | | |
 | `CCG_MODE` | auto | `cost` / `balanced` / `quality` |
-| `CCG_PROVIDERS` | `codex bailian` | Stage 1 的提供商（最多 2 个并行）|
+| `CCG_REVIEW` | `on` | 主开关：`on` / `off`（关闭时 `ccg review` 为空操作，`ccg commit` 跳过状态检查）|
+| `CCG_PROVIDERS` | auto（按模式）| Stage 1 的提供商（最多 2 个并行）。quality: codex+gemini, cost/balanced: bailian 对。Claude 默认保留给综合步骤。|
+| **提供商模型** | | |
 | `CCG_CODEX_MODEL` | 按模式 | 覆盖 Codex 模型 |
+| `CCG_CLAUDE_MODEL` | 按模式 | 覆盖 Claude 模型 |
 | `CCG_GEMINI_MODEL` | 按模式 | 覆盖 Gemini 模型 |
 | `CCG_BAILIAN_MODEL` | 按模式 | 覆盖 Bailian 模型 |
-| `BAILIAN_API_KEY` | — | Bailian 必需 |
-| `GEMINI_API_KEY` | — | Gemini 必需 |
+| **API 密钥** | | |
+| `BAILIAN_API_KEY` | — | Bailian（阿里云）API 密钥 |
+| `ANTHROPIC_API_KEY` / `CLAUDE_API_KEY` | — | Anthropic API 密钥 |
+| `GEMINI_API_KEY` | — | Google Gemini API 密钥 |
+| **自定义端点（代理）** | | |
+| `CCG_CODEX_BASE_URL` / `OPENAI_BASE_URL` | OpenAI | Codex / OpenAI 代理 URL |
+| `CCG_CLAUDE_BASE_URL` / `ANTHROPIC_BASE_URL` | api.anthropic.com | Claude 代理 URL |
+| `CCG_GEMINI_BASE_URL` / `GEMINI_BASE_URL` | Google | Gemini 代理 URL |
+| `CCG_BAILIAN_BASE_URL` | dashscope.aliyuncs.com | Bailian 代理 URL |
+| **超时 / 参数** | | |
+| `CCG_CODEX_TIMEOUT` | 240 | Codex 超时（秒）|
+| `CCG_GEMINI_TIMEOUT` | 120 | Gemini 超时（秒）|
+| `CCG_BAILIAN_TIMEOUT` | 120 | Bailian 超时（秒）|
+| `CCG_CLAUDE_TIMEOUT` | 120 | Claude 超时（秒）|
+| `CCG_BAILIAN_TEMP` | 0.7 | Bailian 温度 |
+| `CCG_BAILIAN_MAX_TOKENS` | 4096 | Bailian 最大 token 数 |
+| `CCG_BAILIAN_RETRIES` | 3 | Bailian 重试次数 |
+| `CCG_CLAUDE_RETRIES` | 3 | Claude 重试次数 |
+| **门禁 / 提交** | | |
 | `CCG_GATE_OFFLINE` | 0 | 设为 1 跳过 Stage 2 评审 |
 | `CCG_GATE_DISCUSS` | allow | 设为 `block` 阻止 discuss verdict |
+| `CCG_NO_AUTO_ADD` | 0 | Stage 2：跳过自动 `git add -A`，仅使用已暂存内容 |
+| `CCG_COMMIT_FORCE` | 0 | Stage 2：绕过 diff 哈希检查（强制提交）|
+| `CCG_AUTOCOMMIT_ALL` | 0 | 自动提交所有更改（包括未跟踪文件）|
+| `CCG_AUTOCOMMIT_DRY_RUN` | 0 | 自动提交干跑模式 |
+| `CCG_DIFF_CACHED_ONLY` | 0 | 仅使用缓存的 diff |
+| **合并** | | |
 | `CCG_MERGE_DRY_RUN` | 0 | Stage 3：解决但不 commit |
 | `CCG_MERGE_NO_AI` | 0 | Stage 3：跳过 AI 解决 |
 | `CCG_MERGE_NO_FETCH` | 0 | Stage 3：跳过远程 fetch |
 | `CCG_MERGE_MAX_CONFLICTS` | 50 | Stage 3：最大冲突文件数 |
 | `CCG_MERGE_KEEP_BACKUP` | 0 | Stage 3：成功后保留备份分支 |
+| **缓存 / 账本 / 报告** | | |
+| `CCG_NO_CACHE` | 0 | 禁用 prompt 缓存 |
 | `CCG_CACHE_TTL_HOURS` | 24 | Prompt 缓存 TTL |
+| `CCG_CACHE_DIR` | XDG 默认 | 自定义缓存目录 |
+| `CCG_MAX_PROMPT_KB` | 100 | 最大 prompt 大小（KB）|
+| `CCG_USAGE_LOG` | XDG 默认 | 自定义用量日志路径 |
+| `CCG_LEDGER_LOG` | XDG 默认 | 自定义账本日志路径 |
+| `CCG_LEDGER_MAX_LINES` | 10000 | 账本最大行数（超过后轮转）|
+| `CCG_NO_HISTORY` | 0 | 禁用评审历史注入 |
+| `CCG_HISTORY_MAX` | 3 | 注入的历史评审最大数量 |
+| `CCG_NO_REPORT` | 0 | 禁用报告持久化 |
+| `CCG_REPORT_DIR` | .ccg/reports | 自定义报告目录 |
 | `CCG_KEEP_ARTIFACTS` | 0 | 保留 workdir 用于调试 |
+| **其他** | | |
+| `CCG_ALLOW_SAME_VENDOR` | 0 | 允许 Stage 1 使用相同供应商 |
+| `CCG_SYNTH_PROVIDER` | auto | 覆盖综合器提供商 |
+| `CCG_RISK_LLM` | 0 | 启用基于 LLM 的风险评分 |
 
 ### 使用示例
 
@@ -379,8 +421,7 @@ ccg/
 docs/
 ├── README.zh-CN.md / .ja.md / .ko.md    # 翻译
 ├── ARCHITECTURE.md（+ 3 个翻译）        # 架构深度
-├── CHANGELOG.md                         # 版本历史
-└── SVN.md                               # SVN 集成说明
+└── CHANGELOG.md                         # 版本历史
 ```
 
 ### 存储路径（遵循 XDG 规范）

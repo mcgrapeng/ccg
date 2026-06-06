@@ -2,7 +2,7 @@
 
 > Audience: contributors and integrators. If you just want to use `ccg`, read [README.md](../README.md). If you want to **change ccg**, read this.
 >
-> This doc describes what `ccg.sh` and `bin/ccg.js` actually do. Cross-reference function names with `grep -n '^ccg_\|^_ccg_' ccg.sh` if anything looks off.
+> This doc describes what `ccg.sh`, `ccg-workflow.sh`, and `bin/ccg.js` actually do. Cross-reference function names with `grep -n '^ccg_\|^_ccg_' ccg.sh ccg-workflow.sh` if anything looks off.
 
 **English** ｜ [简体中文](ARCHITECTURE.zh-CN.md) ｜ [日本語](ARCHITECTURE.ja.md) ｜ [한국어](ARCHITECTURE.ko.md)
 
@@ -48,8 +48,8 @@ ccg is a **production-grade orchestrator for multi-model code review from inside
 │      ccg_cleanup / _ccg_check_prompt_size / mktemp 700 isolation        │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  L0  VCS abstraction        _ccg_vcs_detect / _ccg_vcs_root /           │
-│      _ccg_vcs_info / _ccg_svn_diff                                      │
-│      git + SVN 1.7+ (svn diff --git → standard unified diff format)     │
+│      _ccg_vcs_info                                                     │
+│      git only (SVN planned)                                            │
 │      + ccg_precommit_gate  → commit gate (exit 0/1 on verdict)          │
 │      + ccg_install_hook / ccg_uninstall_hook                            │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -151,7 +151,7 @@ Rules in `ccg.sh:ccg_risk_score`:
 | Files > 8 | +10 | hunk count |
 | Docs-only changes (`.md` / `.txt` / `.rst` only) | **-40** | path extensions |
 
-**Thresholds:** `< 20 → cost`, `< 60 → balanced`, `≥ 60 → quality`.
+**Thresholds:** `< 30 → cost`, `30-70 → balanced`, `> 70 → quality`.
 
 **Why no LLM:** transparency, zero cost, PR-able weights. A community contributor can `sed -i 's/+40/+50/' ccg.sh` and submit a 1-line PR. With an LLM scorer, every routing decision becomes opaque.
 
@@ -382,7 +382,7 @@ The synthesis happens **in Claude's head** following the template in `ccg.md`. T
 
 ## 6. Invariants the test suite verifies
 
-`tests/test_ccg.sh` enforces these — 99 tests at last count. Adding code that violates any of these will break CI.
+`tests/test_ccg.sh` enforces these — 141 tests at last count. Adding code that violates any of these will break CI.
 
 | Invariant | Why |
 |---|---|
@@ -454,7 +454,8 @@ The L7 workflow orchestrates a 4-stage process across bash functions and Claude 
 **Stage 2: ccg_commit()** — Zero-LLM hash validation gate
 - After synthesis, ccg validates the review commit metadata
 - Pure bash: no additional LLM cost, only deterministic checks on diff integrity
-- Permits or rejects the commit gate (exit 0/1) via `ccg_precommit_gate`
+- Permits or rejects the commit based on verdict (merge/fix-required/discuss)
+- Note: `ccg_precommit_gate` is a separate function for git hook path, not called by `ccg_commit()`
 
 **Stage 3: ccg_merge()** — Conflict resolution (Bailian primary)
 - If multiple reviewers exist, merge their verdicts using Bailian as primary judge
@@ -480,7 +481,7 @@ ccg/
 ├── bin/ccg.js              → Node CLI wrapper (install / uninstall / doctor / about)
 ├── scripts/install.sh      → local-clone installer
 ├── scripts/curl-install.sh → remote one-liner installer
-├── tests/test_ccg.sh       → 121 regression + adversarial tests for L1–L6
+├── tests/test_ccg.sh       → 141 regression + adversarial tests for L1–L6
 ├── README.md               → English entry point (zh-CN / ja / ko mirror)
 ├── docs/ARCHITECTURE.md    → this file
 └── package.json            → npm publish manifest (@mcgrapeng/ccg)

@@ -73,24 +73,43 @@ Codex / Gemini CLI는 지출을 알려주지 않습니다. ccg는 모든 호출�
 
 ## 설치
 
-한 줄 명령 (Node 불필요):
+### npm 설치 (추천)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mcgrapeng/ccg/main/scripts/curl-install.sh | bash
+npm install -g @mcgrapeng/ccg
 ```
 
-그다음 AI CLI를 한 번 설치:
+### 소스에서 설치
 
 ```bash
-npm i -g @openai/codex @google/gemini-cli
-echo 'export GEMINI_API_KEY="<your-key>"' >> ~/.zshenv
+git clone https://github.com/mcgrapeng/ccg.git
+cd ccg
+npm link
 ```
 
-확인:
+### 설치 확인
 
 ```bash
-npx @mcgrapeng/ccg doctor      # Codex / Gemini / API key 점검
-npx @mcgrapeng/ccg about       # 7개 계층의 기능과 현재 환경 상태 확인
+ccg --version
+ccg doctor        # 환경 설정 점검
+ccg config        # 현재 설정 표시
+ccg models        # 사용 가능한 모델 목록
+```
+
+**환경 요구사항:**
+- `bash 3.2+`、`git`、`curl`、`jq`
+- Node.js >= 16
+
+**API 키 설정 (최소 1개):**
+```bash
+# Alibaba Bailian (중국 추천)
+export BAILIAN_API_KEY="sk-xxxx"
+
+# Anthropic Claude
+export ANTHROPIC_API_KEY="sk-ant-xxxx"
+
+# Google Gemini
+export GEMINI_API_KEY="AIzaSy-xxxx"
 ```
 
 ## 분기 검출 예제 (ccg가 잡아내는 일반적인 패턴)

@@ -44,26 +44,50 @@ CCG guards the entire path from working tree to remote — not just the review s
 
 ## Installation
 
-```bash
-# Clone & install
-git clone https://github.com/your-org/ccg.git
-cd ccg
-ln -s "$(pwd)/ccg" /usr/local/bin/ccg
+### npm 安装（推荐）
 
-# Verify
-ccg config
-ccg models
+```bash
+npm install -g @mcgrapeng/ccg
 ```
 
-**Requirements:**
-- `bash 3.2+`, `git`, `curl`, `jq`
-- At least one of: `codex` CLI, `gemini` CLI, `ANTHROPIC_API_KEY`, or `BAILIAN_API_KEY`
+### 从源码安装
 
-**Custom API endpoints (third-party proxies supported):**
-- `CCG_CODEX_BASE_URL` / `OPENAI_BASE_URL` — Codex / OpenAI proxy
-- `CCG_CLAUDE_BASE_URL` / `ANTHROPIC_BASE_URL` — Claude / Anthropic proxy
-- `CCG_GEMINI_BASE_URL` / `GEMINI_BASE_URL` — Gemini proxy
-- `CCG_BAILIAN_BASE_URL` — Bailian proxy
+```bash
+git clone https://github.com/mcgrapeng/ccg.git
+cd ccg
+npm link
+```
+
+### 验证安装
+
+```bash
+ccg --version
+ccg doctor        # 检查环境配置
+ccg config        # 显示当前配置
+ccg models        # 列出所有可用模型
+```
+
+**环境要求:**
+- `bash 3.2+`, `git`, `curl`, `jq`
+- Node.js >= 16
+
+**配置 API 密钥（至少一个）:**
+```bash
+# 阿里云百炼（国内推荐）
+export BAILIAN_API_KEY="sk-xxxx"
+
+# Anthropic Claude
+export ANTHROPIC_API_KEY="sk-ant-xxxx"
+
+# Google Gemini
+export GEMINI_API_KEY="AIzaSy-xxxx"
+```
+
+**自定义 API 端点（支持第三方代理）:**
+- `CCG_CODEX_BASE_URL` / `OPENAI_BASE_URL` — Codex / OpenAI 代理
+- `CCG_CLAUDE_BASE_URL` / `ANTHROPIC_BASE_URL` — Claude / Anthropic 代理
+- `CCG_GEMINI_BASE_URL` / `GEMINI_BASE_URL` — Gemini 代理
+- `CCG_BAILIAN_BASE_URL` — 百炼代理
 
 ---
 

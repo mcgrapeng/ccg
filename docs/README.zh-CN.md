@@ -38,20 +38,44 @@
 
 ## 安装
 
-```bash
-# 克隆 & 安装
-git clone https://github.com/your-org/ccg.git
-cd ccg
-ln -s "$(pwd)/ccg" /usr/local/bin/ccg
+### npm 安装（推荐）
 
-# 验证
-ccg config
-ccg models
+```bash
+npm install -g @mcgrapeng/ccg
 ```
 
-**依赖：**
+### 从源码安装
+
+```bash
+git clone https://github.com/mcgrapeng/ccg.git
+cd ccg
+npm link
+```
+
+### 验证安装
+
+```bash
+ccg --version
+ccg doctor        # 检查环境配置
+ccg config        # 显示当前配置
+ccg models        # 列出所有可用模型
+```
+
+**环境要求：**
 - `bash 3.2+`、`git`、`curl`、`jq`
-- 至少一个：`codex` CLI、`gemini` CLI 或 `BAILIAN_API_KEY`
+- Node.js >= 16
+
+**配置 API 密钥（至少一个）：**
+```bash
+# 阿里云百炼（国内推荐，无需翻墙）
+export BAILIAN_API_KEY="sk-xxxx"
+
+# Anthropic Claude
+export ANTHROPIC_API_KEY="sk-ant-xxxx"
+
+# Google Gemini
+export GEMINI_API_KEY="AIzaSy-xxxx"
+```
 
 ---
 

@@ -73,24 +73,43 @@ Codex / Gemini CLI は支出を教えません。ccg は全呼び出しを記録
 
 ## インストール
 
-ワンライナー（Node 不要）：
+### npm インストール（推奨）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mcgrapeng/ccg/main/scripts/curl-install.sh | bash
+npm install -g @mcgrapeng/ccg
 ```
 
-次に AI CLI を一度だけインストール：
+### ソースからインストール
 
 ```bash
-npm i -g @openai/codex @google/gemini-cli
-echo 'export GEMINI_API_KEY="<your-key>"' >> ~/.zshenv
+git clone https://github.com/mcgrapeng/ccg.git
+cd ccg
+npm link
 ```
 
-確認：
+### インストール確認
 
 ```bash
-npx @mcgrapeng/ccg doctor      # Codex / Gemini / API key をチェック
-npx @mcgrapeng/ccg about       # 7 層の機能と現在の環境状態を表示
+ccg --version
+ccg doctor        # 環境設定チェック
+ccg config        # 現在の設定表示
+ccg models        # 利用可能なモデル一覧
+```
+
+**環境要件:**
+- `bash 3.2+`、`git`、`curl`、`jq`
+- Node.js >= 16
+
+**API キー設定（少なくとも1つ）:**
+```bash
+# 阿里云百煉（国内推奨）
+export BAILIAN_API_KEY="sk-xxxx"
+
+# Anthropic Claude
+export ANTHROPIC_API_KEY="sk-ant-xxxx"
+
+# Google Gemini
+export GEMINI_API_KEY="AIzaSy-xxxx"
 ```
 
 ## 分岐検出の例（ccg が捕捉する一般的パターン）

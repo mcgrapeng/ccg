@@ -28,7 +28,7 @@
   },
   "license": "MIT",
   "author": "mcgrapeng",
-  "private": true,
+  "private": false,
   "bin": {
     "ccg": "./bin/ccg.js"
   },

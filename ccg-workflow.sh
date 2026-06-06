@@ -11,6 +11,9 @@ source "$_ccg_workflow_dir/ccg.sh"
 source "$_ccg_workflow_dir/ccg-bailian-models.sh"
 source "$_ccg_workflow_dir/ccg-multi-provider.sh"
 
+# Load config file (if exists) - env vars override config values
+_ccg_load_config
+
 # ============================================================
 # Internal: extract a CCG_RISK_SCORE value with safe default
 # ============================================================

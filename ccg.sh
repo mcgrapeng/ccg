@@ -77,6 +77,223 @@ _ccg_xdg_cache_dir()  { printf '%s/ccg\n' "${XDG_CACHE_HOME:-$HOME/.cache}"; }
 _ccg_xdg_config_dir() { printf '%s/ccg\n' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
 
 # ============================================================
+# Configuration file support
+# Config file location: ~/.config/ccg/config (or $XDG_CONFIG_HOME/ccg/config)
+# Format: KEY=VALUE (one per line, # comments supported)
+# ============================================================
+
+# Get the config file path
+_ccg_config_file() {
+  local config_dir
+  config_dir="$(_ccg_xdg_config_dir)"
+  printf '%s/config\n' "$config_dir"
+}
+
+# Load config file into environment (only sets vars that are not already set)
+# This allows env vars to override config file values
+_ccg_load_config() {
+  local config_file
+  config_file="$(_ccg_config_file)"
+
+  if [ ! -f "$config_file" ]; then
+    return 0
+  fi
+
+  # Read config file line by line
+  local line key value
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Skip empty lines and comments
+    line="${line#"${line%%[![:space:]]*}"}"  # trim leading whitespace
+    line="${line%"${line##*[![:space:]]}"}"  # trim trailing whitespace
+    [ -z "$line" ] && continue
+    case "$line" in
+      \#*) continue ;;  # skip comments
+    esac
+
+    # Parse KEY=VALUE
+    case "$line" in
+      *=*)
+        key="${line%%=*}"
+        value="${line#*=}"
+        # Remove surrounding quotes if present
+        case "$value" in
+          \"*\") value="${value#\"}"; value="${value%\"}" ;;
+          \'*\') value="${value#\'}"; value="${value%\'}" ;;
+        esac
+        # Only set if not already in environment
+        if [ -z "${!key:-}" ]; then
+          export "$key=$value"
+        fi
+        ;;
+    esac
+  done < "$config_file"
+}
+
+# Set a config value
+_ccg_config_set() {
+  local key="$1"
+  local value="$2"
+  local config_file
+  config_file="$(_ccg_config_file)"
+  local config_dir
+  config_dir="$(dirname "$config_file")"
+
+  # Create config directory if it doesn't exist
+  if [ ! -d "$config_dir" ]; then
+    mkdir -p "$config_dir" 2>/dev/null || {
+      echo "❌ Cannot create config directory: $config_dir" >&2
+      return 1
+    }
+  fi
+
+  # Create config file if it doesn't exist
+  if [ ! -f "$config_file" ]; then
+    cat > "$config_file" << 'EOF'
+# CCG Configuration File
+# Format: KEY=VALUE (one per line)
+# Lines starting with # are comments
+# Environment variables override config file values
+#
+# API Keys (configure at least one):
+# BAILIAN_API_KEY=sk-xxx
+# DEEPSEEK_API_KEY=sk-xxx
+# KIMI_API_KEY=sk-xxx
+# GLM_API_KEY=xxx.xxx
+# MINIMAX_API_KEY=xxx
+# MIMO_API_KEY=sk-xxx
+# ANTHROPIC_API_KEY=sk-ant-xxx
+# GEMINI_API_KEY=AIzaSy-xxx
+#
+# Default providers (optional):
+# CCG_PROVIDERS=deepseek
+# CCG_MODE=balanced
+#
+# Custom endpoints (optional):
+# CCG_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+# CCG_KIMI_BASE_URL=https://api.moonshot.cn/v1
+# CCG_GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+# CCG_MINIMAX_BASE_URL=https://api.minimax.chat/v1
+# CCG_MIMO_BASE_URL=https://api.mimo.com/v1
+EOF
+  fi
+
+  # Update or add the key
+  local temp_file
+  temp_file=$(mktemp -t "ccg.config.XXXXXXXX" 2>/dev/null) || temp_file="/tmp/ccg.config.$$"
+
+  # Remove existing key if present, then add new value
+  grep -v "^${key}=" "$config_file" > "$temp_file" 2>/dev/null || true
+  printf '%s=%s\n' "$key" "$value" >> "$temp_file"
+
+  # Atomic replace
+  mv "$temp_file" "$config_file" 2>/dev/null || {
+    echo "❌ Cannot write config file: $config_file" >&2
+    rm -f "$temp_file"
+    return 1
+  }
+
+  echo "✅ Set $key in $config_file"
+}
+
+# Get a config value
+_ccg_config_get() {
+  local key="$1"
+  local config_file
+  config_file="$(_ccg_config_file)"
+
+  if [ ! -f "$config_file" ]; then
+    return 1
+  fi
+
+  grep "^${key}=" "$config_file" 2>/dev/null | head -1 | cut -d= -f2-
+}
+
+# List all config values
+_ccg_config_list() {
+  local config_file
+  config_file="$(_ccg_config_file)"
+
+  if [ ! -f "$config_file" ]; then
+    echo "No config file found at: $config_file"
+    echo "Run 'ccg config init' to create one"
+    return 0
+  fi
+
+  echo "Config file: $config_file"
+  echo ""
+  grep -v '^#' "$config_file" | grep -v '^$' | while IFS= read -r line; do
+    local key="${line%%=*}"
+    local value="${line#*=}"
+    # Mask API keys for security
+    case "$key" in
+      *API_KEY*|*SECRET*|*TOKEN*)
+        if [ -n "$value" ] && [ "$value" != "sk-xxx" ] && [ "$value" != "xxx" ]; then
+          printf '  %s=%s***\n' "$key" "${value:0:8}"
+        else
+          printf '  %s=%s\n' "$key" "$value"
+        fi
+        ;;
+      *)
+        printf '  %s=%s\n' "$key" "$value"
+        ;;
+    esac
+  done
+}
+
+# Initialize config file with template
+_ccg_config_init() {
+  local config_file
+  config_file="$(_ccg_config_file)"
+  local config_dir
+  config_dir="$(dirname "$config_file")"
+
+  # Create config directory if it doesn't exist
+  if [ ! -d "$config_dir" ]; then
+    mkdir -p "$config_dir" 2>/dev/null || {
+      echo "❌ Cannot create config directory: $config_dir" >&2
+      return 1
+    }
+  fi
+
+  if [ -f "$config_file" ]; then
+    echo "Config file already exists: $config_file"
+    echo "Use 'ccg config set KEY VALUE' to update values"
+    return 0
+  fi
+
+  cat > "$config_file" << 'EOF'
+# CCG Configuration File
+# Format: KEY=VALUE (one per line)
+# Lines starting with # are comments
+# Environment variables override config file values
+#
+# API Keys (configure at least one):
+# BAILIAN_API_KEY=sk-xxx
+# DEEPSEEK_API_KEY=sk-xxx
+# KIMI_API_KEY=sk-xxx
+# GLM_API_KEY=xxx.xxx
+# MINIMAX_API_KEY=xxx
+# MIMO_API_KEY=sk-xxx
+# ANTHROPIC_API_KEY=sk-ant-xxx
+# GEMINI_API_KEY=AIzaSy-xxx
+#
+# Default providers (optional):
+# CCG_PROVIDERS=deepseek
+# CCG_MODE=balanced
+#
+# Custom endpoints (optional):
+# CCG_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+# CCG_KIMI_BASE_URL=https://api.moonshot.cn/v1
+# CCG_GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+# CCG_MINIMAX_BASE_URL=https://api.minimax.chat/v1
+# CCG_MIMO_BASE_URL=https://api.mimo.com/v1
+EOF
+
+  echo "✅ Created config file: $config_file"
+  echo "Edit this file to configure CCG, or use 'ccg config set KEY VALUE'"
+}
+
+# ============================================================
 # Internal: escape a string for safe embedding in JSON values.
 # Handles backslash, double-quote, and control characters.
 # ============================================================

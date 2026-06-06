@@ -57,25 +57,53 @@ npm link
 ```bash
 ccg --version
 ccg doctor        # 检查环境配置
-ccg config        # 显示当前配置
-ccg models        # 列出所有可用模型
 ```
 
 **环境要求：**
 - `bash 3.2+`、`git`、`curl`、`jq`
 - Node.js >= 16
 
-**配置 API 密钥（至少一个）：**
+---
+
+## 配置
+
+CCG 支持两种配置方式（配置文件优先级高于环境变量）：
+
+### 方式一：配置文件（推荐）
+
+一次性配置，永久生效：
+
 ```bash
-# 阿里云百炼（国内推荐，无需翻墙）
-export BAILIAN_API_KEY="sk-xxxx"
+# 初始化配置文件
+ccg config init
 
-# Anthropic Claude
-export ANTHROPIC_API_KEY="sk-ant-xxxx"
+# 设置 API 密钥（选择一个或多个）
+ccg config set DEEPSEEK_API_KEY sk-xxx
+ccg config set KIMI_API_KEY sk-xxx
+ccg config set BAILIAN_API_KEY sk-xxx
+ccg config set ANTHROPIC_API_KEY sk-ant-xxx
 
-# Google Gemini
-export GEMINI_API_KEY="AIzaSy-xxxx"
+# 设置默认提供商（可选）
+ccg config set CCG_PROVIDERS deepseek
+
+# 查看所有配置
+ccg config list
+
+# 直接编辑配置文件
+ccg config edit
 ```
+
+配置文件位置：`~/.config/ccg/config`
+
+### 方式二：环境变量
+
+```bash
+# 在 ~/.bashrc 或 ~/.zshrc 中设置
+export DEEPSEEK_API_KEY="sk-xxx"
+export KIMI_API_KEY="sk-xxx"
+```
+
+**优先级：** 环境变量 > 配置文件 > 默认值
 
 ---
 

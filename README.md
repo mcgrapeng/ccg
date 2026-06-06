@@ -63,25 +63,53 @@ npm link
 ```bash
 ccg --version
 ccg doctor        # 检查环境配置
-ccg config        # 显示当前配置
-ccg models        # 列出所有可用模型
 ```
 
 **环境要求:**
 - `bash 3.2+`, `git`, `curl`, `jq`
 - Node.js >= 16
 
-**配置 API 密钥（至少一个）:**
+---
+
+## Configuration
+
+CCG supports two configuration methods (config file takes priority over environment variables):
+
+### Method 1: Config File (Recommended)
+
+One-time setup, permanent effect:
+
 ```bash
-# 阿里云百炼（国内推荐）
-export BAILIAN_API_KEY="sk-xxxx"
+# Initialize config file
+ccg config init
 
-# Anthropic Claude
-export ANTHROPIC_API_KEY="sk-ant-xxxx"
+# Set API keys (pick one or more)
+ccg config set DEEPSEEK_API_KEY sk-xxx
+ccg config set KIMI_API_KEY sk-xxx
+ccg config set BAILIAN_API_KEY sk-xxx
+ccg config set ANTHROPIC_API_KEY sk-ant-xxx
 
-# Google Gemini
-export GEMINI_API_KEY="AIzaSy-xxxx"
+# Set default provider (optional)
+ccg config set CCG_PROVIDERS deepseek
+
+# View all config
+ccg config list
+
+# Edit config file directly
+ccg config edit
 ```
+
+Config file location: `~/.config/ccg/config`
+
+### Method 2: Environment Variables
+
+```bash
+# Set in ~/.bashrc or ~/.zshrc
+export DEEPSEEK_API_KEY="sk-xxx"
+export KIMI_API_KEY="sk-xxx"
+```
+
+**Priority:** Environment variables > Config file > Default values
 
 **自定义 API 端点（支持第三方代理）:**
 - `CCG_CODEX_BASE_URL` / `OPENAI_BASE_URL` — Codex / OpenAI 代理

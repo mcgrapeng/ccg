@@ -339,19 +339,110 @@ function cmdVersion() {
   console.log(PKG.version);
 }
 
+function cmdConfig(args) {
+  const configDir = path.join(os.homedir(), ".config", "ccg");
+  const configFile = path.join(configDir, "config");
+
+  // Helper to run bash functions
+  function runBash(func) {
+    const r = spawnSync("bash", [
+      "-c",
+      `source "${CCG_SH}" 2>/dev/null; ${func}`
+    ], { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+    return r.stdout || "";
+  }
+
+  const subcmd = args[0] || "list";
+
+  switch (subcmd) {
+    case "init":
+      console.log(runBash("_ccg_config_init"));
+      break;
+
+    case "set": {
+      const key = args[1];
+      const value = args[2];
+      if (!key || !value) {
+        fail("Usage: ccg config set KEY VALUE");
+        process.exit(1);
+      }
+      console.log(runBash(`_ccg_config_set "${key}" "${value}"`));
+      break;
+    }
+
+    case "get": {
+      const key = args[1];
+      if (!key) {
+        fail("Usage: ccg config get KEY");
+        process.exit(1);
+      }
+      const result = runBash(`_ccg_config_get "${key}"`);
+      if (result.trim()) {
+        console.log(result.trim());
+      } else {
+        console.log(`Key '${key}' not found in config`);
+      }
+      break;
+    }
+
+    case "list":
+    case "show":
+      console.log(runBash("_ccg_config_list"));
+      break;
+
+    case "path":
+      console.log(configFile);
+      break;
+
+    case "edit": {
+      const editor = process.env.EDITOR || process.env.VISUAL || "vi";
+      const r = spawnSync(editor, [configFile], { stdio: "inherit" });
+      if (r.error) {
+        fail(`Cannot open editor: ${editor}`);
+        console.log(`\nEdit manually: ${configFile}`);
+      }
+      break;
+    }
+
+    default:
+      console.log(`${C.bold}Usage:${C.reset}`);
+      console.log(`  ccg config init          Create config file with template`);
+      console.log(`  ccg config set KEY VALUE Set a config value`);
+      console.log(`  ccg config get KEY       Get a config value`);
+      console.log(`  ccg config list          List all config values`);
+      console.log(`  ccg config path          Show config file path`);
+      console.log(`  ccg config edit          Open config in editor`);
+      console.log("");
+      console.log(`${C.dim}Config file: ${configFile}${C.reset}`);
+      console.log(`${C.dim}Environment variables override config file values.${C.reset}`);
+      break;
+  }
+}
+
 function cmdHelp() {
-  console.log(`${C.bold}@mcgrapeng/ccg${C.reset} v${PKG.version} — Code Divergence Detector
+  console.log(`${C.bold}@mcgrapeng/ccg${C.reset} v${PKG.version} — Code Change Guardian
 
 ${C.bold}Usage${C.reset}
   npx @mcgrapeng/ccg install      Install /ccg into ~/.claude/commands/
   npx @mcgrapeng/ccg uninstall    Remove the slash command
   npx @mcgrapeng/ccg about        What can ccg do? 7-layer capability probe
   npx @mcgrapeng/ccg doctor       Verify Codex / Gemini / API key
+  npx @mcgrapeng/ccg config       Manage configuration file
   npx @mcgrapeng/ccg version      Print version
   npx @mcgrapeng/ccg help         Show this message
 
+${C.bold}Configuration${C.reset}
+  ccg config init          Create config file with template
+  ccg config set KEY VALUE Set a config value (e.g., ccg config set DEEPSEEK_API_KEY sk-xxx)
+  ccg config get KEY       Get a config value
+  ccg config list          List all config values
+  ccg config path          Show config file path
+  ccg config edit          Open config in editor
+
 ${C.bold}After install${C.reset}
-  Open Claude Code → type ${C.bold}/ccg${C.reset} on a diff.
+  1. Run ${C.bold}ccg config init${C.reset} to create config file
+  2. Edit ${C.bold}~/.config/ccg/config${C.reset} to set API keys
+  3. Open Claude Code → type ${C.bold}/ccg${C.reset} on a diff
 
 ${C.bold}Source${C.reset}  ${PKG.repository.url.replace(/^git\+/, "").replace(/\.git$/, "")}
 ${C.bold}License${C.reset} ${PKG.license}`);
@@ -370,6 +461,8 @@ const dispatch = {
   about: cmdAbout,
   capabilities: cmdAbout,
   caps: cmdAbout,
+  config: cmdConfig,
+  cfg: cmdConfig,
   version: cmdVersion,
   "-v": cmdVersion,
   "--version": cmdVersion,

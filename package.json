@@ -1,6 +1,6 @@
 {
   "name": "@mcgrapeng/ccg",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "Code Change Guardian — a multi-model code review and Git workflow automation CLI for Claude Code: divergence-aware review, risk-aware model routing, AI merge-conflict resolution, and a graphical pre-push gate.",
   "keywords": [
     "claude-code",

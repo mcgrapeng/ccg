@@ -88,6 +88,61 @@ _ccg_resolve_model() {
         esac
       fi
       ;;
+    deepseek)
+      if [ -n "${CCG_DEEPSEEK_MODEL:-}" ]; then
+        echo "$CCG_DEEPSEEK_MODEL"
+      else
+        case "$mode" in
+          cost)    echo "deepseek-chat" ;;
+          quality) echo "deepseek-reasoner" ;;
+          *)       echo "deepseek-chat" ;;
+        esac
+      fi
+      ;;
+    kimi)
+      if [ -n "${CCG_KIMI_MODEL:-}" ]; then
+        echo "$CCG_KIMI_MODEL"
+      else
+        case "$mode" in
+          cost)    echo "moonshot-v1-8k" ;;
+          quality) echo "moonshot-v1-128k" ;;
+          *)       echo "moonshot-v1-32k" ;;
+        esac
+      fi
+      ;;
+    glm)
+      if [ -n "${CCG_GLM_MODEL:-}" ]; then
+        echo "$CCG_GLM_MODEL"
+      else
+        case "$mode" in
+          cost)    echo "glm-4-flash" ;;
+          quality) echo "glm-4-plus" ;;
+          *)       echo "glm-4" ;;
+        esac
+      fi
+      ;;
+    minimax)
+      if [ -n "${CCG_MINIMAX_MODEL:-}" ]; then
+        echo "$CCG_MINIMAX_MODEL"
+      else
+        case "$mode" in
+          cost)    echo "abab6.5s-chat" ;;
+          quality) echo "abab6.5g-chat" ;;
+          *)       echo "abab6.5s-chat" ;;
+        esac
+      fi
+      ;;
+    mimo)
+      if [ -n "${CCG_MIMO_MODEL:-}" ]; then
+        echo "$CCG_MIMO_MODEL"
+      else
+        case "$mode" in
+          cost)    echo "mimo-v2.5" ;;
+          quality) echo "mimo-v2.5-pro" ;;
+          *)       echo "mimo-v2.5-pro" ;;
+        esac
+      fi
+      ;;
   esac
 }
 
@@ -138,6 +193,43 @@ _ccg_validate_provider() {
         echo "ok"
       else
         echo "no-api-key"
+      fi
+      ;;
+    deepseek)
+      if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+        echo "ok"
+      else
+        echo "no-api-key"
+      fi
+      ;;
+    kimi)
+      if [ -n "${KIMI_API_KEY:-}" ]; then
+        echo "ok"
+      else
+        echo "no-api-key"
+      fi
+      ;;
+    glm)
+      if [ -n "${GLM_API_KEY:-}" ]; then
+        echo "ok"
+      else
+        echo "no-api-key"
+      fi
+      ;;
+    minimax)
+      if [ -n "${MINIMAX_API_KEY:-}" ]; then
+        echo "ok"
+      else
+        echo "no-api-key"
+      fi
+      ;;
+    mimo)
+      if [ -n "${MIMO_API_KEY:-}" ] && [ -n "${CCG_MIMO_BASE_URL:-}" ]; then
+        echo "ok"
+      elif [ -z "${MIMO_API_KEY:-}" ]; then
+        echo "no-api-key"
+      else
+        echo "no-base-url"
       fi
       ;;
     *)

@@ -346,20 +346,40 @@ CCG 基于风险评分自动选择模式，或通过 `CCG_MODE` 强制指定。
 | `CCG_CLAUDE_MODEL` | 按模式 | 覆盖 Claude 模型 |
 | `CCG_GEMINI_MODEL` | 按模式 | 覆盖 Gemini 模型 |
 | `CCG_BAILIAN_MODEL` | 按模式 | 覆盖 Bailian 模型 |
+| `CCG_DEEPSEEK_MODEL` | 按模式 | 覆盖 DeepSeek 模型 |
+| `CCG_KIMI_MODEL` | 按模式 | 覆盖 Kimi 模型 |
+| `CCG_GLM_MODEL` | 按模式 | 覆盖 GLM 模型 |
+| `CCG_MINIMAX_MODEL` | 按模式 | 覆盖 MiniMax 模型 |
+| `CCG_MIMO_MODEL` | 按模式 | 覆盖 Mimo 模型 |
 | **API 密钥** | | |
 | `BAILIAN_API_KEY` | — | Bailian（阿里云）API 密钥 |
 | `ANTHROPIC_API_KEY` / `CLAUDE_API_KEY` | — | Anthropic API 密钥 |
 | `GEMINI_API_KEY` | — | Google Gemini API 密钥 |
+| `DEEPSEEK_API_KEY` | — | DeepSeek 官方 API 密钥 |
+| `KIMI_API_KEY` | — | Kimi（月之暗面）官方 API 密钥 |
+| `GLM_API_KEY` | — | GLM（智谱）官方 API 密钥 |
+| `MINIMAX_API_KEY` | — | MiniMax 官方 API 密钥 |
+| `MIMO_API_KEY` | — | Mimo 官方 API 密钥 |
 | **自定义端点（代理）** | | |
 | `CCG_CODEX_BASE_URL` / `OPENAI_BASE_URL` | OpenAI | Codex / OpenAI 代理 URL |
 | `CCG_CLAUDE_BASE_URL` / `ANTHROPIC_BASE_URL` | api.anthropic.com | Claude 代理 URL |
 | `CCG_GEMINI_BASE_URL` / `GEMINI_BASE_URL` | Google | Gemini 代理 URL |
 | `CCG_BAILIAN_BASE_URL` | dashscope.aliyuncs.com | Bailian 代理 URL |
+| `CCG_DEEPSEEK_BASE_URL` | api.deepseek.com/v1 | DeepSeek 官方 API URL |
+| `CCG_KIMI_BASE_URL` | api.moonshot.cn/v1 | Kimi 官方 API URL |
+| `CCG_GLM_BASE_URL` | open.bigmodel.cn/api/paas/v4 | GLM 官方 API URL |
+| `CCG_MINIMAX_BASE_URL` | api.minimax.chat/v1 | MiniMax 官方 API URL |
+| `CCG_MIMO_BASE_URL` | — | Mimo 官方 API URL（必填）|
 | **超时 / 参数** | | |
 | `CCG_CODEX_TIMEOUT` | 240 | Codex 超时（秒）|
 | `CCG_GEMINI_TIMEOUT` | 120 | Gemini 超时（秒）|
 | `CCG_BAILIAN_TIMEOUT` | 120 | Bailian 超时（秒）|
 | `CCG_CLAUDE_TIMEOUT` | 120 | Claude 超时（秒）|
+| `CCG_DEEPSEEK_TIMEOUT` | 120 | DeepSeek 超时（秒）|
+| `CCG_KIMI_TIMEOUT` | 120 | Kimi 超时（秒）|
+| `CCG_GLM_TIMEOUT` | 120 | GLM 超时（秒）|
+| `CCG_MINIMAX_TIMEOUT` | 120 | MiniMax 超时（秒）|
+| `CCG_MIMO_TIMEOUT` | 120 | Mimo 超时（秒）|
 | `CCG_BAILIAN_TEMP` | 0.7 | Bailian 温度 |
 | `CCG_BAILIAN_MAX_TOKENS` | 4096 | Bailian 最大 token 数 |
 | `CCG_BAILIAN_RETRIES` | 3 | Bailian 重试次数 |
@@ -407,6 +427,24 @@ CCG_PROVIDERS="bailian" ccg review
 
 # 指定 Bailian 模型
 CCG_BAILIAN_MODEL=deepseek-v4 ccg review
+
+# 使用 DeepSeek 官方 API
+DEEPSEEK_API_KEY="sk-xxx" CCG_PROVIDERS="deepseek" ccg review
+
+# 使用 Kimi（月之暗面）官方 API
+KIMI_API_KEY="sk-xxx" CCG_PROVIDERS="kimi" ccg review
+
+# 使用 GLM（智谱）官方 API
+GLM_API_KEY="xxx.xxx" CCG_PROVIDERS="glm" ccg review
+
+# 使用 MiniMax 官方 API
+MINIMAX_API_KEY="xxx" CCG_PROVIDERS="minimax" ccg review
+
+# 使用 Mimo 官方 API（需要自定义 base URL）
+MIMO_API_KEY="sk-xxx" CCG_MIMO_BASE_URL="https://api.mimo.com/v1" CCG_PROVIDERS="mimo" ccg review
+
+# 混合独立提供商（不同厂商）
+DEEPSEEK_API_KEY="sk-xxx" KIMI_API_KEY="sk-xxx" CCG_PROVIDERS="deepseek kimi" ccg review
 
 # 干跑 merge（解决但不 commit）
 CCG_MERGE_DRY_RUN=1 ccg merge main

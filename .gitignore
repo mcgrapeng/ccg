@@ -25,3 +25,4 @@ ccg.test.workdir/
 *.local
 PROMO.md
 .claude
+.plan.md

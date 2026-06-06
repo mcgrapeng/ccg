@@ -35,6 +35,21 @@
 #   CCG_BAILIAN_TEMP    — Bailian temperature (default: 0.7)
 #   CCG_BAILIAN_MAX_TOKENS — Bailian max tokens (default: 4096)
 #   CCG_BAILIAN_RETRIES — Bailian retry attempts (default: 3)
+#
+#   Independent provider API keys (optional, overrides Bailian platform):
+#   DEEPSEEK_API_KEY    — DeepSeek official API key
+#   KIMI_API_KEY        — Kimi (Moonshot) official API key
+#   GLM_API_KEY         — GLM (Zhipu) official API key
+#   MINIMAX_API_KEY     — MiniMax official API key
+#   MIMO_API_KEY        — Mimo official API key
+#
+#   Independent provider base URLs (optional):
+#   CCG_DEEPSEEK_BASE_URL — DeepSeek API endpoint (default: https://api.deepseek.com/v1)
+#   CCG_KIMI_BASE_URL     — Kimi API endpoint (default: https://api.moonshot.cn/v1)
+#   CCG_GLM_BASE_URL      — GLM API endpoint (default: https://open.bigmodel.cn/api/paas/v4)
+#   CCG_MINIMAX_BASE_URL  — MiniMax API endpoint (default: https://api.minimax.chat/v1)
+#   CCG_MIMO_BASE_URL     — Mimo API endpoint (default: TBD)
+#
 #   CCG_KEEP_ARTIFACTS  — Set to 1 to keep workdir for debugging
 #   CCG_NO_CACHE        — Set to 1 to bypass prompt-hash cache
 #   CCG_CACHE_TTL_HOURS — Cache TTL in hours (default: 24)
@@ -1721,6 +1736,226 @@ ccg_gemini() {
 
   echo "CCG_GEMINI_OK=${sz}b"
   return 0
+}
+
+# ============================================================
+# Internal: Generic OpenAI-compatible API call (cache-aware, usage-logged)
+# Used by independent providers (deepseek, kimi, glm, minimax, mimo)
+# Args: <provider> <api_key> <base_url> <model> <prompt_file> <out_file> [timeout] [temperature] [max_tokens]
+# ============================================================
+_ccg_openai_compatible() {
+  local provider="$1"
+  local api_key="$2"
+  local base_url="$3"
+  local model="$4"
+  local prompt_file="$5"
+  local out_file="$6"
+  local timeout_sec="${7:-120}"
+  local temperature="${8:-0.7}"
+  local max_tokens="${9:-4096}"
+  local err_file="${out_file%.result}.err"
+
+  temperature=$(_ccg_num_or "$temperature" 0.7)
+  max_tokens=$(_ccg_num_or "$max_tokens" 4096)
+
+  if [ ! -s "$prompt_file" ]; then
+    : > "$out_file"; echo "CCG_${provider^^}_FAIL=empty-prompt"; return 2
+  fi
+  local oversize
+  if ! oversize=$(_ccg_check_prompt_size "$prompt_file"); then
+    : > "$out_file"; echo "CCG_${provider^^}_FAIL=$oversize"; return 2
+  fi
+
+  : > "$out_file"; : > "$err_file"
+
+  # Cache lookup
+  local cache_key cache_hit=""
+  if cache_key=$(_ccg_cache_key "$prompt_file" "$model" 2>/dev/null) && [ -n "$cache_key" ]; then
+    if cache_hit=$(_ccg_cache_lookup "$cache_key"); then
+      if ! cp "$cache_hit" "$out_file" 2>/dev/null; then
+        echo "CCG_${provider^^}_FAIL=cache-read-failed"
+        return 1
+      fi
+      local sz
+      sz=$(wc -c <"$out_file" | tr -d ' ')
+      local in_tok out_tok
+      in_tok=$(_ccg_tokens_from_chars "$(wc -c <"$prompt_file" | tr -d ' ')")
+      out_tok=$(_ccg_tokens_from_chars "$sz")
+      _ccg_log_usage "$provider" "$model" "$in_tok" "$out_tok" "0.000000" "1"
+      echo "CCG_${provider^^}_OK=${sz}b cache=hit"
+      return 0
+    fi
+  fi
+
+  if [ -z "$api_key" ]; then
+    echo "CCG_${provider^^}_FAIL=no-api-key"; return 3
+  fi
+
+  if ! _ccg_check_jq; then
+    : > "$out_file"; echo "CCG_${provider^^}_FAIL=jq-missing"; return 127
+  fi
+
+  local prompt_content
+  prompt_content=$(cat "$prompt_file")
+
+  local payload_tmp
+  payload_tmp=$(mktemp -t "ccg.payload.XXXXXXXX" 2>/dev/null) || payload_tmp="${workdir:-/tmp}/ccg.payload.$$.${RANDOM:-x}"
+  jq -n \
+    --arg model "$model" \
+    --argjson temperature "$temperature" \
+    --argjson max_tokens "$max_tokens" \
+    --arg content "$prompt_content" \
+    '{model: $model, messages: [{role: "user", content: $content}], temperature: $temperature, max_tokens: $max_tokens, top_p: 0.95}' \
+    > "$payload_tmp" 2>/dev/null
+
+  local _hdr_tmp
+  _hdr_tmp=$(mktemp -t "ccg.hdr.XXXXXXXX" 2>/dev/null) || _hdr_tmp="${workdir:-/tmp}/ccg.hdr.$$.${RANDOM:-x}"
+  (umask 077 && printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$api_key" > "$_hdr_tmp")
+
+  local ec=0
+  base_url="${base_url%/}"
+  _ccg_run_with_timeout "$timeout_sec" \
+    curl -s -X POST "${base_url}/chat/completions" \
+    -H @"$_hdr_tmp" \
+    -d @"$payload_tmp" \
+    > "$out_file.tmp" 2> "$err_file" || ec=$?
+
+  rm -f "$payload_tmp" "$_hdr_tmp"
+
+  if [ "$ec" -eq 124 ]; then
+    rm -f "$out_file.tmp"
+    echo "CCG_${provider^^}_FAIL=timeout-${timeout_sec}s"; return 124
+  fi
+
+  if [ ! -s "$out_file.tmp" ]; then
+    rm -f "$out_file.tmp"
+    echo "CCG_${provider^^}_FAIL=empty-output (exit=$ec)"
+    { tail -3 "$err_file" 2>/dev/null | _ccg_redact; } >> "$err_file"
+    return 1
+  fi
+
+  # Check for API errors
+  if jq -e '.error // empty' "$out_file.tmp" >/dev/null 2>&1; then
+    echo "CCG_${provider^^}_FAIL=api-error"
+    LC_ALL=C head -c 300 "$out_file.tmp" | _ccg_redact
+    rm -f "$out_file.tmp"
+    return 1
+  fi
+
+  # Extract content from OpenAI-compatible response
+  local content
+  content=$(jq -r '.choices[0].message.content // empty' "$out_file.tmp" 2>/dev/null)
+  if [ -z "$content" ]; then
+    echo "CCG_${provider^^}_FAIL=parse-error"
+    jq . "$out_file.tmp" 2>/dev/null | head -5 >> "$err_file"
+    rm -f "$out_file.tmp"
+    return 1
+  fi
+
+  printf '%s\n' "$content" > "$out_file"
+  rm -f "$out_file.tmp"
+
+  local sz
+  sz=$(wc -c <"$out_file" | tr -d ' ')
+
+  # Log usage
+  local in_tok out_tok in_price out_price usd
+  in_tok=$(_ccg_tokens_from_chars "$(wc -c <"$prompt_file" | tr -d ' ')")
+  out_tok=$(_ccg_tokens_from_chars "$sz")
+  in_price=$(_ccg_price "$model" input)
+  out_price=$(_ccg_price "$model" output)
+  usd=$(awk -v ip="$in_price" -v op="$out_price" -v it="$in_tok" -v ot="$out_tok" \
+        'BEGIN { printf "%.6f", (ip * it + op * ot) / 1000000 }')
+  _ccg_log_usage "$provider" "$model" "$in_tok" "$out_tok" "$usd" "0"
+
+  [ -n "$cache_key" ] && _ccg_cache_store "$cache_key" "$out_file"
+
+  echo "CCG_${provider^^}_OK=${sz}b"
+  return 0
+}
+
+# ============================================================
+# Public: call DeepSeek official API (cache-aware, usage-logged)
+# ============================================================
+ccg_deepseek() {
+  local prompt_file="$1"
+  local out_file="$2"
+  local api_key="${DEEPSEEK_API_KEY:-}"
+  local base_url="${CCG_DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}"
+  local model="${CCG_DEEPSEEK_MODEL:-deepseek-chat}"
+  local timeout_sec="${CCG_DEEPSEEK_TIMEOUT:-120}"
+  local temperature="${CCG_DEEPSEEK_TEMP:-0.7}"
+  local max_tokens="${CCG_DEEPSEEK_MAX_TOKENS:-4096}"
+
+  _ccg_openai_compatible "deepseek" "$api_key" "$base_url" "$model" "$prompt_file" "$out_file" "$timeout_sec" "$temperature" "$max_tokens"
+}
+
+# ============================================================
+# Public: call Kimi/Moonshot official API (cache-aware, usage-logged)
+# ============================================================
+ccg_kimi() {
+  local prompt_file="$1"
+  local out_file="$2"
+  local api_key="${KIMI_API_KEY:-}"
+  local base_url="${CCG_KIMI_BASE_URL:-https://api.moonshot.cn/v1}"
+  local model="${CCG_KIMI_MODEL:-moonshot-v1-8k}"
+  local timeout_sec="${CCG_KIMI_TIMEOUT:-120}"
+  local temperature="${CCG_KIMI_TEMP:-0.7}"
+  local max_tokens="${CCG_KIMI_MAX_TOKENS:-4096}"
+
+  _ccg_openai_compatible "kimi" "$api_key" "$base_url" "$model" "$prompt_file" "$out_file" "$timeout_sec" "$temperature" "$max_tokens"
+}
+
+# ============================================================
+# Public: call GLM/Zhipu official API (cache-aware, usage-logged)
+# ============================================================
+ccg_glm() {
+  local prompt_file="$1"
+  local out_file="$2"
+  local api_key="${GLM_API_KEY:-}"
+  local base_url="${CCG_GLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}"
+  local model="${CCG_GLM_MODEL:-glm-4-flash}"
+  local timeout_sec="${CCG_GLM_TIMEOUT:-120}"
+  local temperature="${CCG_GLM_TEMP:-0.7}"
+  local max_tokens="${CCG_GLM_MAX_TOKENS:-4096}"
+
+  _ccg_openai_compatible "glm" "$api_key" "$base_url" "$model" "$prompt_file" "$out_file" "$timeout_sec" "$temperature" "$max_tokens"
+}
+
+# ============================================================
+# Public: call MiniMax official API (cache-aware, usage-logged)
+# ============================================================
+ccg_minimax() {
+  local prompt_file="$1"
+  local out_file="$2"
+  local api_key="${MINIMAX_API_KEY:-}"
+  local base_url="${CCG_MINIMAX_BASE_URL:-https://api.minimax.chat/v1}"
+  local model="${CCG_MINIMAX_MODEL:-abab6.5s-chat}"
+  local timeout_sec="${CCG_MINIMAX_TIMEOUT:-120}"
+  local temperature="${CCG_MINIMAX_TEMP:-0.7}"
+  local max_tokens="${CCG_MINIMAX_MAX_TOKENS:-4096}"
+
+  _ccg_openai_compatible "minimax" "$api_key" "$base_url" "$model" "$prompt_file" "$out_file" "$timeout_sec" "$temperature" "$max_tokens"
+}
+
+# ============================================================
+# Public: call Mimo official API (cache-aware, usage-logged)
+# ============================================================
+ccg_mimo() {
+  local prompt_file="$1"
+  local out_file="$2"
+  local api_key="${MIMO_API_KEY:-}"
+  local base_url="${CCG_MIMO_BASE_URL:-}"
+  local model="${CCG_MIMO_MODEL:-mimo-v2.5-pro}"
+  local timeout_sec="${CCG_MIMO_TIMEOUT:-120}"
+  local temperature="${CCG_MIMO_TEMP:-0.7}"
+  local max_tokens="${CCG_MIMO_MAX_TOKENS:-4096}"
+
+  if [ -z "$base_url" ]; then
+    echo "CCG_MIMO_FAIL=no-base-url"; return 3
+  fi
+
+  _ccg_openai_compatible "mimo" "$api_key" "$base_url" "$model" "$prompt_file" "$out_file" "$timeout_sec" "$temperature" "$max_tokens"
 }
 
 # ============================================================

@@ -540,20 +540,40 @@ CCG auto-selects mode based on risk score, or you can force it via `CCG_MODE`.
 | `CCG_CLAUDE_MODEL` | by mode | Override Claude model |
 | `CCG_GEMINI_MODEL` | by mode | Override Gemini model |
 | `CCG_BAILIAN_MODEL` | by mode | Override Bailian model |
+| `CCG_DEEPSEEK_MODEL` | by mode | Override DeepSeek model |
+| `CCG_KIMI_MODEL` | by mode | Override Kimi model |
+| `CCG_GLM_MODEL` | by mode | Override GLM model |
+| `CCG_MINIMAX_MODEL` | by mode | Override MiniMax model |
+| `CCG_MIMO_MODEL` | by mode | Override Mimo model |
 | **API keys** | | |
 | `BAILIAN_API_KEY` | — | Bailian (Aliyun) API key |
 | `ANTHROPIC_API_KEY` / `CLAUDE_API_KEY` | — | Anthropic API key |
 | `GEMINI_API_KEY` | — | Google Gemini API key |
+| `DEEPSEEK_API_KEY` | — | DeepSeek official API key |
+| `KIMI_API_KEY` | — | Kimi (Moonshot) official API key |
+| `GLM_API_KEY` | — | GLM (Zhipu) official API key |
+| `MINIMAX_API_KEY` | — | MiniMax official API key |
+| `MIMO_API_KEY` | — | Mimo official API key |
 | **Custom endpoints (proxies)** | | |
 | `CCG_CODEX_BASE_URL` / `OPENAI_BASE_URL` | OpenAI | Codex / OpenAI proxy URL |
 | `CCG_CLAUDE_BASE_URL` / `ANTHROPIC_BASE_URL` | api.anthropic.com | Claude proxy URL |
 | `CCG_GEMINI_BASE_URL` / `GEMINI_BASE_URL` | Google | Gemini proxy URL |
 | `CCG_BAILIAN_BASE_URL` | dashscope.aliyuncs.com | Bailian proxy URL |
+| `CCG_DEEPSEEK_BASE_URL` | api.deepseek.com/v1 | DeepSeek official API URL |
+| `CCG_KIMI_BASE_URL` | api.moonshot.cn/v1 | Kimi official API URL |
+| `CCG_GLM_BASE_URL` | open.bigmodel.cn/api/paas/v4 | GLM official API URL |
+| `CCG_MINIMAX_BASE_URL` | api.minimax.chat/v1 | MiniMax official API URL |
+| `CCG_MIMO_BASE_URL` | — | Mimo official API URL (required) |
 | **Timeouts / Parameters** | | |
 | `CCG_CODEX_TIMEOUT` | 240 | Codex timeout (seconds) |
 | `CCG_GEMINI_TIMEOUT` | 120 | Gemini timeout (seconds) |
 | `CCG_BAILIAN_TIMEOUT` | 120 | Bailian timeout (seconds) |
 | `CCG_CLAUDE_TIMEOUT` | 120 | Claude timeout (seconds) |
+| `CCG_DEEPSEEK_TIMEOUT` | 120 | DeepSeek timeout (seconds) |
+| `CCG_KIMI_TIMEOUT` | 120 | Kimi timeout (seconds) |
+| `CCG_GLM_TIMEOUT` | 120 | GLM timeout (seconds) |
+| `CCG_MINIMAX_TIMEOUT` | 120 | MiniMax timeout (seconds) |
+| `CCG_MIMO_TIMEOUT` | 120 | Mimo timeout (seconds) |
 | `CCG_BAILIAN_TEMP` | 0.7 | Bailian temperature |
 | `CCG_BAILIAN_MAX_TOKENS` | 4096 | Bailian max tokens |
 | `CCG_BAILIAN_RETRIES` | 3 | Bailian retry count |
@@ -604,6 +624,24 @@ CCG_MODE=quality CCG_PROVIDERS="codex claude" ccg review
 
 # Specific Bailian model
 CCG_BAILIAN_MODEL=deepseek-v4 ccg review
+
+# Use DeepSeek official API
+DEEPSEEK_API_KEY="sk-xxx" CCG_PROVIDERS="deepseek" ccg review
+
+# Use Kimi (Moonshot) official API
+KIMI_API_KEY="sk-xxx" CCG_PROVIDERS="kimi" ccg review
+
+# Use GLM (Zhipu) official API
+GLM_API_KEY="xxx.xxx" CCG_PROVIDERS="glm" ccg review
+
+# Use MiniMax official API
+MINIMAX_API_KEY="xxx" CCG_PROVIDERS="minimax" ccg review
+
+# Use Mimo official API (requires custom base URL)
+MIMO_API_KEY="sk-xxx" CCG_MIMO_BASE_URL="https://api.mimo.com/v1" CCG_PROVIDERS="mimo" ccg review
+
+# Mix independent providers (different vendors)
+DEEPSEEK_API_KEY="sk-xxx" KIMI_API_KEY="sk-xxx" CCG_PROVIDERS="deepseek kimi" ccg review
 
 # Use OpenAI through proxy (e.g., for China)
 CCG_CODEX_BASE_URL="https://your-proxy.com/v1" ccg review
